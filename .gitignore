@@ -36,6 +36,7 @@ data/
 
 # Models
 models/
+weights/
 *.pth
 *.pt
 *.bin
@@ -62,3 +63,5 @@ Thumbs.db
 .kaggle/
 
 *.sh
+*.png
+*.jpg
