@@ -140,7 +140,7 @@ def main():
     
     logging.info('Creating datasets and dataloaders...')
     train_dataset = HumanPreferenceDataset(
-        data=train_data.reset_index(drop=True),
+        data=train_df,
         tokenizer=tokenizer,
         max_length=CONFIG['max_length'],
         prompt_ratio=CONFIG['prompt_ratio'],
@@ -149,7 +149,7 @@ def main():
         usage="train"
     )
     val_dataset = HumanPreferenceDataset(
-        data=val_data.reset_index(drop=True),
+        data=val_data,
         tokenizer=tokenizer,
         max_length=CONFIG['max_length'],
         prompt_ratio=CONFIG['prompt_ratio'],

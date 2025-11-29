@@ -43,9 +43,9 @@ def parse_command_line_args() -> Dict[str, Any]:
     parser.add_argument('--prompt_ratio', type=float, default=None,
                         help='提示词比例')
     
-    parser.add_argument('--use_amp', type=bool, default=None,
+    parser.add_argument('--use_amp', default=False, action='store_true', 
                         help='是否使用自动混合精度')
-    parser.add_argument('--use_lora', type=bool, default=None,
+    parser.add_argument('--use_lora', default=False, action='store_true', 
                         help='是否使用LoRA')
     parser.add_argument('--batch_size', type=int, default=None,
                         help='批次大小')
