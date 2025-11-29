@@ -143,7 +143,7 @@ def main():
         max_length=CONFIG['max_length'],
         prompt_ratio=CONFIG['prompt_ratio'],
         cache_dir="./data",
-        force_reprocess=True,
+        force_reprocess=False,
         usage="train"
     )
     val_dataset = HumanPreferenceDataset(

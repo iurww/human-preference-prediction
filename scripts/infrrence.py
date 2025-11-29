@@ -6,7 +6,6 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from tqdm import tqdm
-from train import PreferenceDataset
 
 # 配置日志
 logging.basicConfig(
