@@ -62,6 +62,12 @@ Thumbs.db
 # Kaggle
 .kaggle/
 
+# Log
+log/
+
+# Figures
+figures/
+
 *.sh
 *.png
 *.jpg

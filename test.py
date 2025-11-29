@@ -2,125 +2,88 @@ import json
 import os
 import torch
 from transformers import AutoTokenizer, AutoModel
-from dataset.human_preference_dataset import PreferenceDataset
+# from dataset.human_preference_dataset import PreferenceDataset
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# 设置本地模型路径
-model_path = "./models/deberta"  # 修改为你的实际路径
 
-# 加载 tokenizer 和模型
-# 使用 AutoTokenizer 和 AutoModel 会自动识别模型类型
+model_path = "./models/deberta" 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
-# model = AutoModel.from_pretrained(model_path)
-# print(model)
-
-# # 将模型移到 GPU
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# model = model.to(device)
-# model.eval()  # 设置为评估模式
-
-# # 示例：处理文本
-# text = "这是一个测试句子。"
-
-# # Tokenize 输入文本
-# inputs = tokenizer(
-#     text,
-#     return_tensors="pt",  # 返回 PyTorch tensor
-#     padding=True,
-#     truncation=True,
-#     max_length=512,
-    
-# )
-
-# # 将输入移到 GPU
-# inputs = {k: v.to(device) for k, v in inputs.items()}
-
-# # 前向传播
-# with torch.no_grad():
-#     outputs = model(**inputs)
-
-# print(outputs)
-# # 获取输出
-# last_hidden_state = outputs.last_hidden_state  # [batch_size, seq_len, hidden_size]
-# pooler_output = outputs.pooler_output if hasattr(outputs, 'pooler_output') else None
-
-# print(f"输入 token IDs 形状: {inputs['input_ids'].shape}")
-# print(f"Last hidden state 形状: {last_hidden_state.shape}")
-# print(f"Hidden size: {model.config.hidden_size}")
-# print(f"设备: {device}")
+model = AutoModel.from_pretrained(model_path)
+model.to("cuda")
 
 
 
-def _parse_json_field(field):
-    """解析 JSON 格式的字段"""
-    try:
-        parsed = json.loads(field)
-        if isinstance(parsed, list):
-            return ' '.join(str(x) for x in parsed)
-        return str(parsed)
-    except:
-        return str(field)
+# ---------------- 两段文本 -----------------
+short_text = "今天天气真好！"                       # 11 个字符
+long_text = "人工智能（Artificial Intelligence，AI）亦称智械爱仕达是大苏打水电工科技阿尔达规范收到回复是绝对符合结束战斗风格和是绝对符合所带来符合器智能，指由人制造出来的机器所表现出来的智能。通常人工智能是指通过普通计算机程序来呈现人类智能的技术。该词也指出研究这样的智能系统是否能够实现，以及如何实现。同时，人类的无数职业也逐渐被其取代。" * 20  # 约 1 300 字
 
-LENGTH_FILE = 'data/train_lengths.npy'   # 保存路径
-max_len = 0
-max_prompt = ""
-if os.path.exists(LENGTH_FILE):
-    # 直接加载
-    lengths = np.load(LENGTH_FILE)
-    print('✅ 已加载缓存长度数组')
-else:
-    # 第一次：重新统计
-    print('⏳ 未找到缓存，开始统计 token 长度...')
-    train_df = pd.read_csv('data/train_new.csv')
-    lengths = []
-    cnt = 0
-    for _, row in tqdm(train_df.iterrows(), total=len(train_df), desc='tokenize'):
-        text = (f"Prompt: {_parse_json_field(row['prompt'])}\n\n")
-                # f"Response A: {_parse_json_field(row['response_a'])}\n\n"
-                # f"Response B: {_parse_json_field(row['response_b'])}")
-        tok = tokenizer(text)
-        lengths.append(len(tok['input_ids']))
-        if len(tok['input_ids']) > max_len:
-            max_len = len(tok['input_ids'])
-            max_prompt = row
-        
-    lengths = np.array(lengths)
-    # print(cnt)
-    np.save(LENGTH_FILE, lengths)          # 落盘
-    print('✅ 统计完成并缓存')
+texts = {"short": short_text, "long": long_text, 'a': short_text, 'b': long_text}
 
-print('max length in data :', lengths.max())
-print('> 1024 的样本数     :', (lengths > 1024).sum())
-print(f"90分位数: {np.percentile(lengths, 90):.0f}")
+# ---------------- 主循环 -----------------
+res = {}
+for name, text in texts.items():
+    # 1. tokenize & pad to 1024
+    enc = tokenizer(
+        text,
+        return_tensors="pt",
+        truncation=True,
+        padding="max_length",
+        max_length=1024
+    ).to("cuda")
+    print(enc['input_ids'].shape, name)   # torch.Size([1, tokens])
 
-import numpy as np
-import matplotlib.pyplot as plt
+    # 2. 测时：GPU 同步 + Event
+    torch.cuda.synchronize()
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    start.record()
+    with torch.no_grad():
+        _ = model(**enc)
+    end.record()
+    torch.cuda.synchronize()
+    elapsed_ms = start.elapsed_time(end)      # 毫秒
 
-plt.figure(figsize=(8, 5))
+    res[name] = {
+        "tokens": enc.input_ids.shape[1],     # 1024
+        "time_ms": elapsed_ms
+    }
+    print(f"{name:>5} text – tokens: {res[name]['tokens']},  GPU time: {elapsed_ms:.2f} ms")
 
-# 1. 让 bin 边界落在“整数幂”或“分位点”
-#    这里用 Freedman–Diaconis 规则算宽度
-q25, q75 = np.percentile(lengths, [25, 75])
-bin_width = 2 * (q75 - q25) / len(lengths)**(1/3)
-bins = np.arange(min(lengths), max(lengths) + bin_width, bin_width)
 
-# 2. 画直方图
-n, _, patches = plt.hist(lengths, bins=bins, color='steelblue', alpha=0.7, edgecolor='black')
+# def _parse_json_field(field):
+#     """解析 JSON 格式的字段"""
+#     try:
+#         parsed = json.loads(field)
+#         if isinstance(parsed, list):
+#             return ' '.join(str(x) for x in parsed)
+#         return str(parsed)
+#     except:
+#         return str(field)
 
-# 3. 叠一条核密度曲线
-from scipy.stats import gaussian_kde
-kde = gaussian_kde(lengths)
-x_range = np.linspace(min(lengths), max(lengths), 300)
-plt.plot(x_range, kde(x_range)*len(lengths)*bin_width, color='red', lw=2, label='KDE')
+# train_df = pd.read_csv('data/test.csv')
 
-plt.xlabel("Length")
-plt.ylabel("Count")
-plt.title("Sample Length Distribution")
-plt.grid(True, ls='--', alpha=0.4)
-plt.legend()
-plt.tight_layout()
-plt.savefig('length_distribution_prompt.png', dpi=300)
-print(max_len, max_prompt["prompt"], max_prompt["response_a"], max_prompt["response_b"])
+# cnt = 0
+# for idx, row in tqdm(train_df.iterrows(), total=len(train_df), desc="Analyzing"):
+#     cnt += len(json.loads(row['prompt']))
+
+# print("行数：", cnt)
+# # print(train_df['winner_model_a'].sum(), train_df['winner_model_b'].sum(), train_df['winner_tie'].sum())
+
+x = torch.Tensor([[1,0.2,3], [0.2,0.3,4]])
+label = torch.Tensor([2,0]).long()
+print(x, label)
+import torch.nn.functional as F
+y = F.softmax(x, dim=1)
+print(y)
+selected = y[range(len(label)), label]
+print(selected)
+selected_log = torch.log(selected)
+print(selected_log)
+print(-selected_log.sum() / 2)
+
+
+loss = F.cross_entropy(x, label)
+print(loss)
