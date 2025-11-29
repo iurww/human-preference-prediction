@@ -88,4 +88,21 @@ print(-selected_log.sum() / 2)
 loss = F.cross_entropy(x, label)
 print(loss)
 
-train_df = pd.read_csv('data/2feaacdd17022010_split.csv')
+# train_df = pd.read_csv('data/2feaacdd17022010_split.csv')
+
+
+import torch
+
+samples = torch.load('data/6c7e738a32ba8354_cache.pt')        # List[Dict]
+
+# special_counts = [s['special_token_counts'] for s in samples]
+
+# import pandas as pd
+# df_counts = pd.DataFrame(special_counts)       # 每行对应一条样本的统计
+# print(df_counts.head())
+
+for s in samples:
+    # print(s['input_ids'][0:30])
+    # print((s['input_ids'] == 1).sum())
+    idx = (s['input_ids'] == 3).nonzero(as_tuple=False).flatten()
+    print(idx)      # tensor([ 5, 17, 42])

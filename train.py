@@ -104,8 +104,6 @@ def main():
     logging.info(f'Initializing model: {CONFIG["model_name"]}')
     tokenizer = AutoTokenizer.from_pretrained(
         CONFIG['model_name'], 
-        trust_remote_code=True, 
-        fix_mistral_regex=True
     )
     model = AutoModelForSequenceClassification.from_pretrained(
         CONFIG['model_name'],
@@ -145,7 +143,7 @@ def main():
         max_length=CONFIG['max_length'],
         prompt_ratio=CONFIG['prompt_ratio'],
         cache_dir="./data",
-        force_reprocess=False,
+        force_reprocess=True,
         usage="train"
     )
     val_dataset = HumanPreferenceDataset(
@@ -161,7 +159,7 @@ def main():
     train_loader = DataLoader(
         train_dataset,
         batch_size=CONFIG['batch_size'],
-        shuffle=True,
+        shuffle=False,
         num_workers=0
     )
     val_loader = DataLoader(
