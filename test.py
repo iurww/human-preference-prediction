@@ -16,41 +16,41 @@ model.to("cuda")
 
 
 
-# ---------------- 两段文本 -----------------
-short_text = "今天天气真好！"                       # 11 个字符
-long_text = "人工智能（Artificial Intelligence，AI）亦称智械爱仕达是大苏打水电工科技阿尔达规范收到回复是绝对符合结束战斗风格和是绝对符合所带来符合器智能，指由人制造出来的机器所表现出来的智能。通常人工智能是指通过普通计算机程序来呈现人类智能的技术。该词也指出研究这样的智能系统是否能够实现，以及如何实现。同时，人类的无数职业也逐渐被其取代。" * 20  # 约 1 300 字
+# # ---------------- 两段文本 -----------------
+# short_text = "今天天气真好！"                       # 11 个字符
+# long_text = "人工智能（Artificial Intelligence，AI）亦称智械爱仕达是大苏打水电工科技阿尔达规范收到回复是绝对符合结束战斗风格和是绝对符合所带来符合器智能，指由人制造出来的机器所表现出来的智能。通常人工智能是指通过普通计算机程序来呈现人类智能的技术。该词也指出研究这样的智能系统是否能够实现，以及如何实现。同时，人类的无数职业也逐渐被其取代。" * 20  # 约 1 300 字
 
-texts = {"short": short_text, "long": long_text, 'a': short_text, 'b': long_text}
+# texts = {"short": short_text, "long": long_text, 'a': short_text, 'b': long_text}
 
-# ---------------- 主循环 -----------------
-res = {}
-for name, text in texts.items():
-    # 1. tokenize & pad to 1024
-    enc = tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        padding="max_length",
-        max_length=1024
-    ).to("cuda")
-    print(enc['input_ids'].shape, name)   # torch.Size([1, tokens])
+# # ---------------- 主循环 -----------------
+# res = {}
+# for name, text in texts.items():
+#     # 1. tokenize & pad to 1024
+#     enc = tokenizer(
+#         text,
+#         return_tensors="pt",
+#         truncation=True,
+#         padding="max_length",
+#         max_length=1024
+#     ).to("cuda")
+#     print(enc['input_ids'].shape, name)   # torch.Size([1, tokens])
 
-    # 2. 测时：GPU 同步 + Event
-    torch.cuda.synchronize()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
-    with torch.no_grad():
-        _ = model(**enc)
-    end.record()
-    torch.cuda.synchronize()
-    elapsed_ms = start.elapsed_time(end)      # 毫秒
+#     # 2. 测时：GPU 同步 + Event
+#     torch.cuda.synchronize()
+#     start = torch.cuda.Event(enable_timing=True)
+#     end = torch.cuda.Event(enable_timing=True)
+#     start.record()
+#     with torch.no_grad():
+#         _ = model(**enc)
+#     end.record()
+#     torch.cuda.synchronize()
+#     elapsed_ms = start.elapsed_time(end)      # 毫秒
 
-    res[name] = {
-        "tokens": enc.input_ids.shape[1],     # 1024
-        "time_ms": elapsed_ms
-    }
-    print(f"{name:>5} text – tokens: {res[name]['tokens']},  GPU time: {elapsed_ms:.2f} ms")
+#     res[name] = {
+#         "tokens": enc.input_ids.shape[1],     # 1024
+#         "time_ms": elapsed_ms
+#     }
+#     print(f"{name:>5} text – tokens: {res[name]['tokens']},  GPU time: {elapsed_ms:.2f} ms")
 
 
 # def _parse_json_field(field):
@@ -72,7 +72,7 @@ for name, text in texts.items():
 # print("行数：", cnt)
 # # print(train_df['winner_model_a'].sum(), train_df['winner_model_b'].sum(), train_df['winner_tie'].sum())
 
-x = torch.Tensor([[1,0.2,3], [0.2,0.3,4]])
+x = torch.Tensor([[0.33,0.33,0.33], [0.33,0.33,0.33]])
 label = torch.Tensor([2,0]).long()
 print(x, label)
 import torch.nn.functional as F
@@ -87,3 +87,5 @@ print(-selected_log.sum() / 2)
 
 loss = F.cross_entropy(x, label)
 print(loss)
+
+train_df = pd.read_csv('data/2feaacdd17022010_split.csv')

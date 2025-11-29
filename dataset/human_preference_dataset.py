@@ -56,7 +56,8 @@ class HumanPreferenceDataset(Dataset):
             self._save_cache()
     
     def _generate_cache_key(self) -> str:
-        key_str = f"{self.max_length}_{self.prompt_ratio}_{self.tokenizer.name_or_path}_{self.usage}"
+        key_str = f"{self.max_length}_{self.prompt_ratio}_{self.tokenizer.name_or_path}_{self.usage}_{len(self.data)}"
+        logging.info(f"Cache key string: {key_str}")
         return hashlib.md5(key_str.encode()).hexdigest()[:16]
     
     def _parse_json_field(self, field: str) -> List[str]:
@@ -169,17 +170,17 @@ class HumanPreferenceDataset(Dataset):
     def _process_data(self):
         df = self.data
         
-        logging.info("拆分JSON数组...")
+        logging.info("拆分多轮对话样本...")
         expanded_df = self._expand_rows(df)
         
-        logging.info(f"保存拆分后的CSV到: {self.processed_csv_path}")
-        expanded_df.to_csv(
-            self.processed_csv_path,
-            index=False,
-            quoting=csv.QUOTE_MINIMAL,
-            escapechar='\\',
-            doublequote=False
-        )
+        # logging.info(f"保存拆分后的CSV到: {self.processed_csv_path}")
+        # expanded_df.to_csv(
+        #     self.processed_csv_path,
+        #     index=False,
+        #     quoting=csv.QUOTE_MINIMAL,
+        #     escapechar='\\',
+        #     doublequote=False
+        # )
         
         logging.info("Tokenizing...")
         self.samples = []
@@ -262,7 +263,6 @@ if __name__ == "__main__":
         force_reprocess=False
     )
     
-    # 查看样本
     print("\n样本示例:")
     sample = dataset[0]
     print(f"ID: {sample['id']}")
@@ -271,14 +271,12 @@ if __name__ == "__main__":
     print(f"Model A: {sample['model_a']}")
     print(f"Model B: {sample['model_b']}")
     
-    # 查看标签分布
     print("\n标签分布:")
     dist = dataset.get_label_distribution()
     print(f"Model A 胜: {dist['model_a_win']}")
     print(f"Model B 胜: {dist['model_b_win']}")
     print(f"平局: {dist['tie']}")
     
-    # 创建DataLoader
     from torch.utils.data import DataLoader
     
     dataloader = DataLoader(
@@ -288,7 +286,6 @@ if __name__ == "__main__":
         num_workers=0
     )
     
-    print("\n批次示例:")
     batch = next(iter(dataloader))
     print(f"Batch input_ids shape: {batch['input_ids'].shape}")
     print(f"Batch labels shape: {batch['label'].shape}")
