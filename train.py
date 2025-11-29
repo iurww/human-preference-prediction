@@ -233,10 +233,10 @@ def main():
             logging.info(f'🎉 New best training loss: {best_train_loss:.4f}')
             
             # 保存模型
-            os.makedirs('models', exist_ok=True)
-            model.save_pretrained('models/best_model')
-            tokenizer.save_pretrained('models/best_model')
-            logging.info('Model saved to models/best_model/')
+            os.makedirs('checkpoints', exist_ok=True)
+            model.save_pretrained('checkpoints/best_model')
+            tokenizer.save_pretrained('checkpoints/best_model')
+            logging.info('Model saved to checkpoints/best_model/')
             
             wandb.run.summary['best_train_log_loss'] = best_train_loss
     

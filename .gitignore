@@ -68,6 +68,9 @@ log/
 # Figures
 figures/
 
+# Checkpoints
+checkpoints/
+
 *.sh
 *.png
 *.jpg
