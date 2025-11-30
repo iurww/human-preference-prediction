@@ -88,7 +88,7 @@ def main():
     wandb.init(
         project='human-preference-prediction',
         config=CONFIG,
-        name=f"deberta-v3-base-lr{CONFIG['learning_rate']}"
+        name=f"train-deberta-lr{CONFIG['learning_rate']:.1e}-bs{CONFIG['batch_size']}-ep{CONFIG['num_epochs']}"
     )
     
     print_config()
@@ -217,6 +217,10 @@ def main():
             logging.info(f"Model saved to {CONFIG['checkpoint_dir']}/best_model/")
             
             wandb.run.summary['best_train_log_loss'] = best_train_loss
+        
+        model.save_pretrained(f"{CONFIG['checkpoint_dir']}/last_model")
+        tokenizer.save_pretrained(f"{CONFIG['checkpoint_dir']}/last_model")
+        logging.info(f"Model saved to {CONFIG['checkpoint_dir']}/last_model/")
     
     logging.info("")
     logging.info("=" * 60)
