@@ -182,6 +182,20 @@ $$
 - [WandB 文档](https://docs.wandb.ai/)
 - [Kaggle 竞赛页面](https://www.kaggle.com/c/human-preference)
 
+
+
+## TODO
+
+- amp
+- 换模型
+- lora
+- 数据里的unk怎么处理
+- 数据里是否有相同问题不同模型回答
+- 长样本怎么处理,截断还是滑动窗口
+- 多轮问答拆成单轮问答了,最终概率怎么计算
+
+
+
 ## License
 
 MIT

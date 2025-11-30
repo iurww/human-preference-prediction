@@ -219,9 +219,9 @@ class HumanPreferenceDataset(Dataset):
         Tokenize并智能截断
         返回: (input_ids, token_type_ids)
         """
-        prompt_tokens = self.tokenizer.encode(prompt, add_special_tokens=False)
-        response_a_tokens = self.tokenizer.encode(response_a, add_special_tokens=False)
-        response_b_tokens = self.tokenizer.encode(response_b, add_special_tokens=False)
+        prompt_tokens = self.tokenizer.encode("[Prompt]\n" + prompt, add_special_tokens=False)
+        response_a_tokens = self.tokenizer.encode("[Response_A]\n" + response_a, add_special_tokens=False)
+        response_b_tokens = self.tokenizer.encode("[Response_B]\n" + response_b, add_special_tokens=False)
         
         # special tokens占用空间 ([CLS], [SEP], [SEP], [SEP])
         special_tokens_count = 4
