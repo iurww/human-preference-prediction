@@ -5,146 +5,78 @@
 ## 项目结构
 
 ```
-human-preference/
-├── pyproject.toml          # UV 包管理配置
-├── requirements.txt        # 依赖列表
-├── setup.sh               # 一键设置脚本
-├── .gitignore
-├── README.md
-├── src/
-│   └── __init__.py        # 空文件，用于包结构
-├── scripts/               # 所有 Python 脚本
-│   ├── download_data.py   # 数据下载
-│   ├── train.py          # 训练脚本
-│   ├── train_advanced.py # 高级训练脚本
-│   └── inference.py      # 推理脚本
-├── data/                 # 数据目录（自动创建）
-│   ├── train.csv
+.
+├── checkpoints
+│   └── best_model
+├── configs
+│   ├── __init__.py
+│   ├── configs.py
+│   ├── logging_config.py
+│   └── random_seed.py
+├── data
 │   ├── test.csv
-│   └── sample_submission.csv
-├── models/               # 模型目录（自动创建）
-│   └── best_model/
-└── *.log                 # 训练日志文件
+│   ├── train.csv
+│   └── train_short.csv
+├── dataset
+│   ├── __init__.py
+│   ├── human_preference_dataset.py
+│   └── human_preference_test_dataset.py
+├── models 
+│   └── deberta
+│       ├── config.json
+│       ├── pytorch_model.bin
+│       ├── README.md
+│       ├── spm.model
+│       └── tokenizer_config.json
+├── scripts
+│   ├── analyze.py
+│   ├── data_processing.py
+│   ├── download_data.py
+│   ├── find_dirty.py
+│   ├── infrrence.py
+│   └── train_advanced.py
+├── README.md
+├── setup.sh
+├── inference.py
+└──train.py
 ```
+
+- checkpoint/保存训练模型
+- configs/训练配置
+- dataset/数据集处理
+- data/数据集-kaggle下载
+- models/模型文件-huggingface下载
+- train.py训练
+- inference推理
+
+
 
 ## 快速开始
 
-### 方法 1：使用一键脚本（推荐）
-
 ```bash
-# 1. 创建虚拟环境
-uv venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
+conda create --name mlg3 python=3.13
+conda activate mlg3
+pip install torch transformers datasets pandas numpy scikit-learn wandb tqdm kaggle sentencepiece matplotlib
 
-# 2. 创建必要的文件和目录
-mkdir -p src scripts
-touch src/__init__.py
-
-# 3. 将所有脚本移到 scripts/ 目录
-# (download_data.py, train.py, train_advanced.py, inference.py)
-
-# 4. 运行设置脚本
-chmod +x setup.sh
-./setup.sh
-
-# 5. 配置 Kaggle API
-# 创建 ~/.kaggle/kaggle.json:
-# {"username": "your_username", "key": "your_api_key"}
-
-# 6. 下载数据
-python scripts/download_data.py
-
-# 7. 训练模型
-python scripts/train.py
-
-# 8. 生成预测
-python scripts/inference.py
-```
-
-### 方法 2：手动安装
-
-```bash
-# 1. 创建虚拟环境
-uv venv
-source .venv/bin/activate
-
-# 2. 创建目录结构
-mkdir -p src scripts data models
-touch src/__init__.py
-
-# 3. 安装依赖（使用 requirements.txt）
-uv pip install -r requirements.txt
-
-# 或者直接安装
-uv pip install torch transformers datasets pandas numpy scikit-learn wandb tqdm kaggle
-
-# 4. 配置 Kaggle 和 WandB
-# ... (见下文)
-
-# 5. 运行脚本
-python scripts/download_data.py
-python scripts/train.py
-python scripts/inference.py
-```
-
-## 配置说明
-
-### 1. Kaggle API 配置
-
-创建 `~/.kaggle/kaggle.json` 文件：
-
-```json
-{
-  "username": "your_username",
-  "key": "your_api_key"
-}
-```
-
-获取 API key：https://www.kaggle.com/settings/account
-
-设置权限（Linux/macOS）：
-```bash
-chmod 600 ~/.kaggle/kaggle.json
-```
-
-### 2. WandB 配置
-
-```bash
 wandb login
 ```
 
-输入你的 API key（从 https://wandb.ai/authorize 获取）
+
 
 ## 使用方法
 
 ### 1. 下载数据
 
-```bash
-python scripts/download_data.py
-```
-
-**输出日志示例：**
-```
-2024-01-01 10:00:00 - __main__ - INFO - Data directory created/verified
-2024-01-01 10:00:01 - __main__ - INFO - Downloading dataset from Kaggle...
-2024-01-01 10:00:10 - __main__ - INFO - Dataset downloaded successfully
-2024-01-01 10:00:11 - __main__ - INFO - Dataset extracted successfully
-============================================================
-Data files:
-  - train.csv (45.23 MB)
-  - test.csv (11.34 MB)
-  - sample_submission.csv (0.89 MB)
-============================================================
-```
+放在data目录下,train.csv/test.csv
 
 ### 2. 训练模型
 
 ```bash
-python scripts/train.py
+python train.py
 ```
 
 **功能特性：**
+
 - ✅ 使用 logging 模块记录所有信息
 - ✅ 自动划分训练/验证集（90%/10%）
 - ✅ WandB 记录所有训练指标
@@ -171,7 +103,7 @@ python scripts/train.py
 ### 3. 生成预测
 
 ```bash
-python scripts/inference.py
+python inference.py
 ```
 
 **输出日志示例：**
@@ -197,78 +129,36 @@ python scripts/inference.py
 kaggle competitions submit -c human-preference -f submission.csv -m "DeBERTa-v3-base submission"
 ```
 
+
+
 ## 模型配置
 
-在 `scripts/train.py` 中修改配置：
+在 `configs/configs.py` 中修改配置：
 
 ```python
-CONFIG = {
-    'model_name': 'microsoft/deberta-v3-base',  # 模型名称
-    'max_length': 512,                          # 最大序列长度
-    'batch_size': 8,                            # 批次大小
-    'learning_rate': 2e-5,                      # 学习率
-    'num_epochs': 3,                            # 训练轮数
-    'warmup_ratio': 0.1,                        # 预热比例
-    'weight_decay': 0.01,                       # 权重衰减
-    'seed': 42,                                 # 随机种子
-}
-```
-
-### 推荐配置
-
-**快速实验**（需要 8GB GPU）：
-```python
-CONFIG = {
-    'model_name': 'microsoft/deberta-v3-base',
-    'batch_size': 8,
-    'num_epochs': 3,
-}
-```
-
-**高性能**（需要 16GB+ GPU）：
-```python
-CONFIG = {
-    'model_name': 'microsoft/deberta-v3-large',
-    'batch_size': 4,
-    'max_length': 768,
-    'num_epochs': 5,
-}
-```
-
-**CPU 训练**：
-```python
-CONFIG = {
-    'model_name': 'microsoft/deberta-v3-base',
+DEFAULT_CONFIG = {
+    'model_name': './models/deberta',
+    'train_dataset_path': './data/train.csv',
+    'test_dataset_path': './data/test.csv',
+    'log_dir': './logs',
+    'checkpoint_dir': './checkpoints',
+    
+    'max_length': 1024,
+    'prompt_ratio': 0.3,
+    
+    'use_amp': False,
+    'use_lora': False,
     'batch_size': 2,
-    'num_epochs': 1,
+    'learning_rate': 1e-5,
+    'num_epochs': 40,
+    'warmup_ratio': 0.1,
+    'weight_decay': 0.01,
+    'seed': 42,
+    'val_rate': 0.01
 }
 ```
 
-## 日志系统
 
-项目使用 Python logging 模块，所有日志会：
-- 输出到控制台
-- 保存到 `train.log` 文件
-
-**日志级别：**
-- INFO: 正常运行信息
-- WARNING: 警告信息
-- ERROR: 错误信息
-
-## WandB 监控指标
-
-训练过程中自动记录：
-
-| 指标 | 说明 |
-|------|------|
-| `train_loss` | 训练损失 |
-| `train_log_loss` | 训练集 Log Loss |
-| `val_loss` | 验证损失 |
-| `val_log_loss` | 验证集 Log Loss（主要指标）⭐ |
-| `learning_rate` | 当前学习率 |
-| `best_val_log_loss` | 最佳验证 Log Loss |
-
-在 WandB 网页端查看：https://wandb.ai/
 
 ## 评估指标
 
@@ -284,102 +174,6 @@ $$
 
 **越小越好** ✅
 
-## 常见问题
-
-### Q1: UV 安装失败
-
-**错误：** `Failed to build human-preference-prediction`
-
-**解决方案：**
-```bash
-# 不使用 -e 模式，直接安装依赖
-mkdir -p src
-touch src/__init__.py
-uv pip install -r requirements.txt
-```
-
-### Q2: GPU 内存不足
-
-**错误：** `CUDA out of memory`
-
-**解决方案：**
-```python
-# 在 train.py 中调整
-CONFIG = {
-    'batch_size': 4,  # 或更小，如 2
-    'max_length': 256,  # 减小序列长度
-}
-```
-
-### Q3: Kaggle 下载失败
-
-**错误：** `403 Forbidden`
-
-**解决方案：**
-1. 检查 `~/.kaggle/kaggle.json` 是否正确
-2. 在 Kaggle 网站上接受比赛规则
-3. 检查 API key 是否过期
-
-### Q4: 训练速度慢
-
-**解决方案：**
-- 使用 GPU（CUDA）而不是 CPU
-- 使用 `deberta-v3-base` 而不是 `large`
-- 增加 `batch_size`（如果显存允许）
-- 减小 `max_length`
-
-### Q5: WandB 无法登录
-
-**解决方案：**
-```bash
-# 重新登录
-wandb login --relogin
-
-# 或使用环境变量
-export WANDB_API_KEY=your_api_key
-```
-
-## 性能优化建议
-
-### 1. 数据增强
-```python
-# 交换 response_a 和 response_b
-# 在 PreferenceDataset 中实现
-```
-
-### 2. 模型集成
-```bash
-# 训练多个模型
-python scripts/train.py --seed 42
-python scripts/train.py --seed 123
-python scripts/train.py --seed 456
-
-# 预测时取平均
-```
-
-### 3. 更长的序列
-```python
-CONFIG = {
-    'max_length': 768,  # 从 512 增加到 768
-}
-```
-
-### 4. 学习率调优
-```python
-# 尝试不同的学习率
-learning_rates = [1e-5, 2e-5, 3e-5, 5e-5]
-```
-
-## 项目特点
-
-- ✅ 使用 UV 包管理
-- ✅ 使用 logging 模块记录日志（不使用 print）
-- ✅ WandB 完整集成
-- ✅ 自动保存最佳模型
-- ✅ 完整的错误处理
-- ✅ 详细的日志输出
-- ✅ 支持 GPU/CPU 训练
-- ✅ 代码结构清晰
 
 ## 参考资源
 
