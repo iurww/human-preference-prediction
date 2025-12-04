@@ -126,6 +126,11 @@ def main():
         logging_strategy="steps",
         logging_steps=10,
         
+        # 混合精度训练
+        fp16=CONFIG.get('use_amp', False) and torch.cuda.is_available(),
+        # 如果想用 BF16 (需要 Ampere+ GPU)
+        # bf16=CONFIG.get('use_amp', False) and torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        
         # 其他设置
         dataloader_num_workers=0,
         remove_unused_columns=False,
@@ -138,12 +143,11 @@ def main():
         seed=CONFIG['seed'],
     )
     
-    from transformers import default_data_collator
+    if CONFIG.get('use_amp', False):
+        logging.info('Using Automatic Mixed Precision (AMP) training')
+    
     
     def custom_data_collator(features):
-        """
-        自定义 collator,移除 'id' 字段并将 'label' 重命名为 'labels'
-        """
         # 移除 'id' 字段
         batch = {
             'input_ids': torch.stack([f['input_ids'] for f in features]),
@@ -152,15 +156,14 @@ def main():
         }
         return batch
     
-    
     # 创建Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        tokenizer=tokenizer,
-        data_collator=custom_data_collator,
+        # tokenizer=tokenizer,
+        data_collator=custom_data_collator,  # 使用自定义 collator
         compute_metrics=compute_metrics,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)] if CONFIG.get('early_stopping', False) else None,
     )
