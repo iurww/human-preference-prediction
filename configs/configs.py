@@ -13,7 +13,7 @@ DEFAULT_CONFIG = {
     
     'use_amp': False,
     'use_lora': False,
-    'batch_size': 4,
+    'batch_size': 2,
     'learning_rate': 2e-5,
     'num_epochs': 25,
     'warmup_ratio': 0.1,

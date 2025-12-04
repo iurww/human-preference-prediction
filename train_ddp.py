@@ -53,11 +53,11 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch, local_ra
     else:
         progress_bar = dataloader
     
-    for id_, input_ids, attention_mask, label in progress_bar:
+    for batch in progress_bar:
         
-        input_ids = input_ids.to(device)
-        attention_mask = attention_mask.to(device)
-        labels = label.to(device)
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
         
         optimizer.zero_grad()
         
@@ -105,10 +105,10 @@ def evaluate(model, dataloader, device):
         else:
             progress_bar = dataloader
             
-        for id_, input_ids, attention_mask, label in progress_bar:
-            input_ids = input_ids.to(device)
-            attention_mask = attention_mask.to(device)
-            labels = label.to(device)
+        for batch in progress_bar:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['labels'].to(device)
             
             outputs = model(
                 input_ids=input_ids,

@@ -73,13 +73,13 @@ def inference(model, dataloader, device):
     results = []
     
     progress_bar = tqdm(dataloader, desc='Inference')
-    for idx, (ids, input_ids, attention_mask) in enumerate(progress_bar):
+    for idx, batch in enumerate(progress_bar):
         
-        if idx == 50:
-            break
+        # if idx == 50:
+        #     break
         
-        input_ids = input_ids.to(device)
-        attention_mask = attention_mask.to(device)
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
         
         outputs = model(
             input_ids=input_ids,

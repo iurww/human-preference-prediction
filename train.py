@@ -27,11 +27,11 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch):
     total_loss = 0
     
     progress_bar = tqdm(dataloader, desc=f'Training Epoch {epoch+1}')
-    for id_, input_ids, attention_mask, label in progress_bar:
+    for batch in progress_bar:
         
-        input_ids = input_ids.to(device)
-        attention_mask = attention_mask.to(device)
-        labels = label.to(device)
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
         
         optimizer.zero_grad()
         
@@ -64,10 +64,10 @@ def evaluate(model, dataloader, device):
     total_loss = 0
     
     with torch.no_grad():
-        for id_, input_ids, attention_mask, label in tqdm(dataloader, desc='Evaluating'):
-            input_ids = input_ids.to(device)
-            attention_mask = attention_mask.to(device)
-            labels = label.to(device)
+        for batch in tqdm(dataloader, desc='Evaluating'):
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['labels'].to(device)
             
             outputs = model(
                 input_ids=input_ids,

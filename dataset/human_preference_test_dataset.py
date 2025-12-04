@@ -179,14 +179,14 @@ class HumanPreferenceTestDataset(Dataset):
         id_ = sample['id']
         seq_len = sample['seq_len']
 
-        # attention_mask = [1, 1, ..., 1]
         attention_mask = [1] * seq_len + [0] * (self.max_length - seq_len)
+        
+        return {
+            'id': torch.tensor(id_, dtype=torch.long),
+            'input_ids': torch.tensor(input_ids, dtype=torch.long),
+            'attention_mask': torch.tensor(attention_mask, dtype=torch.long),
+        }
 
-        return (
-            torch.tensor(id_, dtype=torch.long),
-            torch.tensor(input_ids, dtype=torch.long),
-            torch.tensor(attention_mask, dtype=torch.long),
-        )
 
 if __name__ == "__main__":
     
