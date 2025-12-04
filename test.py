@@ -7,12 +7,13 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from collections import Counter
 
 
 model_path = "./models/deberta" 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModel.from_pretrained(model_path)
-model.to("cuda")
+# model = AutoModel.from_pretrained(model_path)
+# model.to("cuda")
 
 
 
@@ -72,21 +73,21 @@ model.to("cuda")
 # print("行数：", cnt)
 # # print(train_df['winner_model_a'].sum(), train_df['winner_model_b'].sum(), train_df['winner_tie'].sum())
 
-x = torch.Tensor([[0.33,0.33,0.33], [0.33,0.33,0.33]])
-label = torch.Tensor([2,0]).long()
-print(x, label)
-import torch.nn.functional as F
-y = F.softmax(x, dim=1)
-print(y)
-selected = y[range(len(label)), label]
-print(selected)
-selected_log = torch.log(selected)
-print(selected_log)
-print(-selected_log.sum() / 2)
+# x = torch.Tensor([[0.33,0.33,0.33], [0.33,0.33,0.33]])
+# label = torch.Tensor([2,0]).long()
+# print(x, label)
+# import torch.nn.functional as F
+# y = F.softmax(x, dim=1)
+# print(y)
+# selected = y[range(len(label)), label]
+# print(selected)
+# selected_log = torch.log(selected)
+# print(selected_log)
+# print(-selected_log.sum() / 2)
 
 
-loss = F.cross_entropy(x, label)
-print(loss)
+# loss = F.cross_entropy(x, label)
+# print(loss)
 
 # train_df = pd.read_csv('data/2feaacdd17022010_split.csv')
 
@@ -107,5 +108,108 @@ print(loss)
 #     idx = (s['input_ids'] == 3).nonzero(as_tuple=False).flatten()
 #     print(idx)      # tensor([ 5, 17, 42])
 
-a = tokenizer.encode("[Response_B]\n", add_special_tokens=False)
-print(a)
+# s = "The world is still half-asleep when you open the curtain, and the sky blushes like it’s embarrassed to be watched. Take a breath—slow enough to taste the coolness on your tongue—and remember that nothing is required of you in this second except to exist. Failures, invoices, and unread messages can wait outside the door; they have no shoes to let themselves in. Give yourself five minutes of mercy, and the day will meet you with softer hands."
+# print(len(s))
+
+# a = tokenizer.encode(s + s, add_special_tokens=False)
+# print(a, len(a))
+
+special_ids = set([tokenizer.cls_token_id, 
+                   tokenizer.sep_token_id, 
+                   tokenizer.pad_token_id, 
+                   tokenizer.unk_token_id,
+                   tokenizer.mask_token_id])   # 例如 {0, 1, 2, 3, 50256, ...}
+cols = ['prompt', 'response_a', 'response_b']
+
+df = pd.read_csv('data/train.csv')
+df[cols] = df[cols].map(lambda s: json.loads(s) if pd.notnull(s) else [])
+assert df[cols].apply(lambda row: len(set(map(len, row))) == 1, axis=1).isin([False]).sum() == 0
+df[cols] = df[cols].map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 else '')
+# df[cols] = df[cols].map(lambda s: tokenizer.encode(s, add_special_tokens=False))
+# # 1. 先拿前 10 行 + cols 列（返回 DataFrame）
+# sub_df = df.iloc[:10, df.columns.get_indexer(cols)]
+
+# # 2. 对每个单元格 encode
+# encoded = sub_df.applymap(lambda s: tokenizer.encode(s, add_special_tokens=False))
+
+
+# exit()
+
+# df.to_parquet('tok.parquet', engine='pyarrow', compression='snappy')
+
+
+# df = pd.read_parquet('tok.parquet')
+# df[cols] = df[cols].map(lambda x: [i for i in x if i not in special_ids])
+# print(df[cols].head())
+
+
+# special_ids = sorted(tokenizer.all_special_ids)   # 例如 [0, 1, 2, 50256]
+
+# def count_special_vec(arr):
+#     if not isinstance(arr, np.ndarray):
+#         return np.zeros(len(special_ids), dtype=int)
+#     bc = np.bincount(arr, minlength=max(special_ids)+1)
+#     return bc[special_ids].astype(int)
+
+# special_counts = np.vstack(df['response_a'].apply(count_special_vec))
+
+# spec_df = pd.DataFrame(special_counts,
+#                        columns=[f'spec_{i}' for i in special_ids],
+#                        index=df.index)
+# spec_df.columns = [f'{i}({tokenizer.decode([i])})' for i in special_ids]
+
+# print(spec_df.describe())
+
+
+# special_ids = set(tokenizer.all_special_ids)   # 例如 {0, 1, 2, 3, 50256, ...}
+
+# print("Special IDs:", special_ids)
+# def count_special(lst):
+#     return sum(1 for tid in lst if tid in special_ids)
+# special_counts = df[cols].map(count_special)  
+# print(special_counts.describe())
+
+
+# for row in df.itertuples(index=False):
+#     ids = row[4]
+#     if len(row[5]) == 0 :
+#         print("Empty B:", row[0])
+#     if len(row[4]) == 0 :
+#         print("Empty A:", row[0])
+    # cnt = Counter(ids)
+    # special_cnt = {sid: cnt.get(sid, 0) for sid in special_ids}
+    # if sum(special_cnt.values()) > 0 and special_cnt[3] > 0:
+    #     print(row[0], special_cnt[3])
+
+# lens = df[cols].map(len)  # 计算长度
+# lens['total'] = lens.sum(axis=1)    # 计算总长度
+# print(lens)
+# print(lens.describe())
+
+
+# # df = df.explode(cols, ignore_index=True)
+# # 3. 查看结果
+# print(df[cols])
+
+bad_a = (df['response_a'].isin([False, '']) | df['response_a'].isna()) & ( df['winner_tie'] == 1)
+print("Bad A:", bad_a.sum())
+print(df[bad_a][cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
+
+bad_b = (df['response_b'].isin([False, '']) | df['response_b'].isna()) & ( df['winner_model_b'] == 1)
+print("Bad B:", bad_b.sum())
+print(df[bad_b][cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
+
+# empty = (df[cols].isin([False, '']) | df[cols].isna())
+# print(empty.sum())
+# mask = empty[['response_a', 'response_b']].any(axis=1)
+# print(mask.sum())
+# bad_rows = df[mask]
+# print(bad_rows[cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
+
+mask = (df['response_a'].eq('') | df['response_b'].eq('')) & df['winner_tie'].eq(1)
+bad = df[mask]
+print(bad)
+
+
+
+

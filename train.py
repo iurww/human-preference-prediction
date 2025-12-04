@@ -27,10 +27,11 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch):
     total_loss = 0
     
     progress_bar = tqdm(dataloader, desc=f'Training Epoch {epoch+1}')
-    for batch in progress_bar:
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        labels = batch['label'].to(device)
+    for id_, input_ids, attention_mask, label in progress_bar:
+        
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        labels = label.to(device)
         
         optimizer.zero_grad()
         
@@ -138,7 +139,7 @@ def main():
     
     logging.info('Creating datasets and dataloaders...')
     train_dataset = HumanPreferenceDataset(
-        data=train_df,
+        data=train_data,
         tokenizer=tokenizer,
         max_length=CONFIG['max_length'],
         prompt_ratio=CONFIG['prompt_ratio'],

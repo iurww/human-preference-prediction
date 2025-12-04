@@ -73,14 +73,13 @@ def inference(model, dataloader, device):
     results = []
     
     progress_bar = tqdm(dataloader, desc='Inference')
-    for idx, batch in enumerate(progress_bar):
+    for idx, (ids, input_ids, attention_mask) in enumerate(progress_bar):
         
         if idx == 50:
             break
         
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        batch_ids = batch['id']
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
         
         outputs = model(
             input_ids=input_ids,
@@ -89,25 +88,18 @@ def inference(model, dataloader, device):
         
         logits = outputs.logits
         probs = torch.softmax(logits, dim=-1).cpu().numpy()
-        
-        for sample_id, prob in zip(batch_ids, probs):
-            parts = sample_id.split('_')
-            turn_index = parts[-1]
-            original_id = '_'.join(parts[:-1])
-            
-            results.append({
-                'id': sample_id,
-                'original_id': original_id,
-                'turn_index': turn_index,
-                'winner_model_a': prob[0],
-                'winner_model_b': prob[1],
-                'winner_tie': prob[2]
-            })
-    
-    predictions_df = pd.DataFrame(results)
-    
-    return predictions_df
+        ids = ids.numpy()                                             # (B,)
 
+        batch_df = pd.DataFrame({
+            'id': ids,
+            'winner_model_a': probs[:, 0],
+            'winner_model_b': probs[:, 1],
+            'winner_tie': probs[:, 2],
+        })
+        results.append(batch_df)
+
+    predictions_df = pd.concat(results, ignore_index=True)
+    return predictions_df
 
 def main():
     
@@ -160,7 +152,7 @@ def main():
         num_workers=0
     )
     
-    # 获取单论对话预测结果
+    # 获取对话预测结果
     logging.info('Starting inference...')
     predictions_df = inference(model, test_loader, device)
     logging.info(f'Generated predictions for {len(predictions_df)} samples')
@@ -173,27 +165,18 @@ def main():
     wandb.log({"raw_results": table})
     wandb.save(raw_predictions_path)
     logging.info(f'Raw predictions uploaded to wandb')
+    
+    
+    # 补全
+    predictions_filled = test_df[['id']].drop_duplicates().merge(predictions_df, on='id', how='left')
+    fill_cols = ['winner_model_a', 'winner_model_b', 'winner_tie']
+    predictions_filled[fill_cols] = predictions_filled[fill_cols].fillna(1/3)
+    
+    filled_predictions_path = f"{CONFIG['checkpoint_dir']}/best_model/predictions_filled.csv"
+    predictions_filled.to_csv(filled_predictions_path, index=False)
+    logging.info(f'Filled predictions saved to: {filled_predictions_path}') 
         
     
-    # 多轮对话结果聚合
-    aggregation_strategy = CONFIG.get('aggregation_strategy', 'mean')
-    logging.info(f'Using aggregation strategy: {aggregation_strategy}')
-    aggregated_df = aggregate_multi_turn_predictions(predictions_df, strategy=aggregation_strategy)
-
-    agg_filled = test_df[['id']].drop_duplicates().merge(aggregated_df, on='id', how='left')
-    fill_cols = ['winner_model_a', 'winner_model_b', 'winner_tie']
-    agg_filled[fill_cols] = agg_filled[fill_cols].fillna(1/3)
-
-    aggregated_path = f"{CONFIG['checkpoint_dir']}/best_model/predictions_aggregated.csv"
-    agg_filled.to_csv(aggregated_path, index=False)
-    logging.info(f'Aggregated predictions saved to: {aggregated_path}')
-
-    table = wandb.Table(dataframe=agg_filled)
-    wandb.log({"aggregated_results": table})
-    wandb.save(aggregated_path)
-    logging.info(f'Aggregated predictions uploaded to wandb')
-    
-
     wandb.finish()
     
 if __name__ == '__main__':
