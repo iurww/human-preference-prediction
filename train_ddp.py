@@ -105,10 +105,10 @@ def evaluate(model, dataloader, device):
         else:
             progress_bar = dataloader
             
-        for batch in progress_bar:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['label'].to(device)
+        for id_, input_ids, attention_mask, label in progress_bar:
+            input_ids = input_ids.to(device)
+            attention_mask = attention_mask.to(device)
+            labels = label.to(device)
             
             outputs = model(
                 input_ids=input_ids,
