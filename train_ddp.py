@@ -142,7 +142,12 @@ def main():
         wandb.init(
             project='human-preference-prediction',
             config=CONFIG,
-            name=f"train-deberta-lr{CONFIG['learning_rate']:.1e}-bs{CONFIG['batch_size']}-ep{CONFIG['num_epochs']}"
+            name=f"train-deberta-ddp\
+            -lr{CONFIG['learning_rate']:.1e}\
+            -bs{CONFIG['batch_size']}\
+            -ep{CONFIG['num_epochs']}\
+            -num_gpus{dist.get_world_size()}\
+            "
         )
         
         print_config()
