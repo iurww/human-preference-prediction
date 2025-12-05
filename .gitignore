@@ -71,6 +71,8 @@ figures/
 # Checkpoints
 checkpoints/
 
+results/
+
 *.sh
 *.png
 *.jpg

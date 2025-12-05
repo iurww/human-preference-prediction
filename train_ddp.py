@@ -174,6 +174,23 @@ def main():
         num_labels=3,
     )
     
+    for param in model.deberta.embeddings.parameters():
+        param.requires_grad = False
+
+    num_layers_to_freeze = 9  
+    for i, layer in enumerate(model.deberta.encoder.layer):
+        if i < num_layers_to_freeze:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+    for param in model.classifier.parameters():
+        param.requires_grad = True
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    logging.info(f"可训练: {trainable_params:,} / 总共: {total_params:,} ({100*trainable_params/total_params:.2f}%)")
+    
+    
     if CONFIG['use_lora']:
         from peft import get_peft_model, LoraConfig, TaskType
         peft_config = LoraConfig(

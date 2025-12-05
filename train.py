@@ -1,10 +1,9 @@
-import os
 import pandas as pd
-import numpy as np
 import wandb
 import logging
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report, confusion_matrix
 
 import torch
 from torch.utils.data import  DataLoader
@@ -62,6 +61,8 @@ def evaluate(model, dataloader, device):
     model.eval()
  
     total_loss = 0
+    all_predictions = []
+    all_labels = []
     
     with torch.no_grad():
         for batch in tqdm(dataloader, desc='Evaluating'):
@@ -78,9 +79,23 @@ def evaluate(model, dataloader, device):
             loss = outputs.loss
             total_loss += loss.item()
             
+            logits = outputs.logits
+            predictions = torch.argmax(logits, dim=-1)
+            
+            all_predictions.extend(predictions.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            
     avg_loss = total_loss / len(dataloader)
+    accuracy = accuracy_score(all_labels, all_predictions)
     
-    return avg_loss
+    # # 计算每个类别的precision, recall, f1
+    # precision, recall, f1, support = precision_recall_fscore_support(
+    #     all_labels, 
+    #     all_predictions, 
+    #     average='macro'  # 三分类用macro平均
+    # )
+    
+    return avg_loss, accuracy
 
 
 def main():
@@ -111,6 +126,23 @@ def main():
         num_labels=3,
     )
     
+    for param in model.deberta.embeddings.parameters():
+        param.requires_grad = False
+
+    num_layers_to_freeze = 9  
+    for i, layer in enumerate(model.deberta.encoder.layer):
+        if i < num_layers_to_freeze:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+    for param in model.classifier.parameters():
+        param.requires_grad = True
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    logging.info(f"可训练: {trainable_params:,} / 总共: {total_params:,} ({100*trainable_params/total_params:.2f}%)")
+
+    
     if CONFIG['use_lora']:
         from peft import get_peft_model, LoraConfig, TaskType
         peft_config = LoraConfig(
@@ -122,7 +154,6 @@ def main():
         model.print_trainable_parameters()
     
     model.to(device)
-    logging.info(f'Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}')
     
     logging.info('Loading training data...')
     train_df = pd.read_csv(CONFIG['train_dataset_path']) if not CONFIG['develop'] else pd.read_csv('data/train_short.csv')
@@ -197,13 +228,14 @@ def main():
         train_loss = train_epoch(model, train_loader, optimizer, scheduler, device, epoch)
         logging.info(f'[Train] Loss: {train_loss:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}')
         
-        val_loss = evaluate(model, val_loader, device)
-        logging.info(f'[Val] Loss: {val_loss:.4f}')
+        val_loss, accuracy = evaluate(model, val_loader, device)
+        logging.info(f'[Val] Loss: {val_loss:.4f}, Accuracy: {accuracy:.4f}')
         
         wandb.log({
             'epoch': epoch + 1,
             'epoch_avg_train_loss': train_loss,
             'epoch_avg_val_loss': val_loss,
+            'epoch_val_accuracy': accuracy,
             'learning_rate': scheduler.get_last_lr()[0]
         })
         
