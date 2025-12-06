@@ -59,6 +59,12 @@ class HumanPreferenceDataset(Dataset):
         
         return tokens[:head_len] + tokens[-tail_len:]
     
+    def _head_truncate(self, tokens: List[int], max_len: int) -> List[int]:
+        return tokens[:max_len]
+    
+    def _tail_truncate(self, tokens: List[int], max_len: int) -> List[int]:
+        return tokens[-max_len:]
+    
     def _merge_and_truncate(self, row: pd.Series, swap: bool = False) -> pd.Series:
         prompt_tokens = row['prompt']
         response_a_tokens = row['response_a']
@@ -125,6 +131,7 @@ class HumanPreferenceDataset(Dataset):
         if not self.force_process and os.path.exists(self.cache_name):
             logging.info(f"加载缓存文件: {self.cache_name}")
             self.samples = pd.read_parquet(self.cache_name, engine='pyarrow')
+            logging.info(f"缓存文件加载完成，样本数: {len(self.samples)}")
             return
         
         logging.info("处理数据...")

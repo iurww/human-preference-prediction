@@ -5,12 +5,14 @@ import logging
 from sklearn.model_selection import train_test_split
 
 import torch
+import torch.distributed as dist
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     TrainingArguments,
     Trainer,
-    EarlyStoppingCallback
+    EarlyStoppingCallback,
+    TrainerCallback
 )
 
 from configs.logging_config import make_log_dir, init_logger
@@ -18,65 +20,209 @@ from configs import CONFIG, print_config
 from dataset import HumanPreferenceDataset
 
 
+class DetailedLoggingCallback(TrainerCallback):
+    
+    def __init__(self, log_every_n_steps=50):
+        self.log_every_n_steps = log_every_n_steps
+        self.start_time = None
+        self.is_main_process = True
+        
+    def on_train_begin(self, args, state, control, **kwargs):
+        import time
+        self.start_time = time.time()
+        self.is_main_process = state.is_world_process_zero
+        
+        if self.is_main_process:
+            logging.info("=" * 80)
+            logging.info("训练开始")
+            logging.info(f"总epochs: {args.num_train_epochs}")
+            logging.info(f"Batch size per device: {args.per_device_train_batch_size}")
+            logging.info(f"Total batch size: {args.per_device_train_batch_size * args.world_size * args.gradient_accumulation_steps}")
+            logging.info(f"Gradient accumulation steps: {args.gradient_accumulation_steps}")
+            logging.info(f"World size (GPUs): {args.world_size}")
+            logging.info(f"学习率: {args.learning_rate}")
+            logging.info("=" * 80)
+        
+    def on_epoch_begin(self, args, state, control, **kwargs):
+        if self.is_main_process:
+            logging.info(f"\n>>> Epoch {state.epoch}/{args.num_train_epochs} 开始")
+        
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        """每次logging时触发"""
+        if self.is_main_process and logs and state.global_step % self.log_every_n_steps == 0:
+            import time
+            elapsed = time.time() - self.start_time
+            
+            msg_parts = [
+                f"Step {state.global_step}/{state.max_steps}",
+                f"Epoch {state.epoch:.2f}",
+            ]
+            
+            if 'loss' in logs:
+                msg_parts.append(f"Loss: {logs['loss']:.4f}")
+            if 'learning_rate' in logs:
+                msg_parts.append(f"LR: {logs['learning_rate']:.2e}")
+            
+            msg_parts.append(f"Time: {elapsed/60:.1f}min")
+            
+            logging.info(" | ".join(msg_parts))
+    
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        if self.is_main_process and metrics:
+            logging.info("\n" + "=" * 80)
+            logging.info(f"📊 评估结果 (Epoch {state.epoch:.2f}):")
+            for key, value in metrics.items():
+                if isinstance(value, (int, float)):
+                    logging.info(f"  {key}: {value:.4f}")
+            logging.info("=" * 80 + "\n")
+    
+    def on_save(self, args, state, control, **kwargs):
+        if self.is_main_process:
+            logging.info(f"💾 保存checkpoint到: {args.output_dir}/checkpoint-{state.global_step}")
+
+
 def compute_metrics(eval_pred):
-    """计算评估指标"""
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
+    
     accuracy = (predictions == labels).mean()
-    return {"accuracy": accuracy}
+    
+    unique_labels = np.unique(labels)
+    class_accuracies = {}
+    for label in unique_labels:
+        mask = labels == label
+        if mask.sum() > 0:
+            class_acc = (predictions[mask] == labels[mask]).mean()
+            class_accuracies[f'accuracy_class_{label}'] = class_acc
+    
+    return {
+        "accuracy": accuracy,
+        **class_accuracies
+    }
+
+
+def print_model_info(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    frozen_params = total_params - trainable_params
+    
+    logging.info("\n" + "=" * 80)
+    logging.info("🔧 模型参数统计:")
+    logging.info(f"  总参数: {total_params:,}")
+    logging.info(f"  可训练参数: {trainable_params:,} ({trainable_params/total_params*100:.2f}%)")
+    logging.info(f"  冻结参数: {frozen_params:,} ({frozen_params/total_params*100:.2f}%)")
+    logging.info("=" * 80 + "\n")
+
+
+def setup_ddp():
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    else:
+        rank = 0
+        world_size = 1
+        local_rank = 0
+    
+    return rank, world_size, local_rank
+
+
+def is_main_process():
+    rank = int(os.environ.get('RANK', 0))
+    return rank == 0
 
 
 def main():
-    init_logger(make_log_dir())
-    print_config()
+    # ============ DDP 设置 ============
+    use_ddp = CONFIG.get('use_ddp', False)
+    rank, world_size, local_rank = setup_ddp()
+    is_main = is_main_process()
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f'Using device: {device}')
+    # 只在主进程初始化logger和打印配置
+    if is_main:
+        init_logger(make_log_dir())
+        print_config()
     
-    if torch.cuda.is_available():
-        logging.info(f'GPU: {torch.cuda.get_device_name(0)}')
-        logging.info(f'GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB')
+    # 设置设备
+    if use_ddp:
+        device = torch.device(f'cuda:{local_rank}')
+        torch.cuda.set_device(device)
+        
+        if is_main:
+            logging.info(f'\n🚀 启用DDP多卡训练')
+            logging.info(f'World Size: {world_size}')
+            logging.info(f'当前进程 Rank: {rank}, Local Rank: {local_rank}')
+            
+            # 打印所有可用GPU
+            for i in range(torch.cuda.device_count()):
+                logging.info(f'GPU {i}: {torch.cuda.get_device_name(i)} '
+                           f'({torch.cuda.get_device_properties(i).total_memory / 1024**3:.2f} GB)')
+    else:
+        # 单卡模式
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if is_main:
+            logging.info(f'使用设备: {device}')
+            if torch.cuda.is_available():
+                logging.info(f'GPU型号: {torch.cuda.get_device_name(0)}')
+                logging.info(f'GPU显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB')
     
-    # 加载模型和tokenizer
-    logging.info(f'Initializing model: {CONFIG["model_name"]}')
+    # ============ 模型初始化 ============
+    if is_main:
+        logging.info(f'\n初始化模型: {CONFIG["model_name"]}')
+    
     tokenizer = AutoTokenizer.from_pretrained(CONFIG['model_name'])
+   
     model = AutoModelForSequenceClassification.from_pretrained(
         CONFIG['model_name'],
         num_labels=3,
-    )
+    )   
     
-    # 如果使用LoRA
-    if CONFIG['use_lora']:
-        from peft import get_peft_model, LoraConfig, TaskType
-        peft_config = LoraConfig(
-            task_type=TaskType.SEQ_CLS,
-            r=8,
-            lora_alpha=32,
-            lora_dropout=0.05,
-            target_modules=["query_proj", "value_proj"]
-        )
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
+    # 冻结策略
+    for param in model.deberta.embeddings.parameters():
+        param.requires_grad = False
+    num_layers_to_freeze = 9  
+    for i, layer in enumerate(model.deberta.encoder.layer):
+        if i < num_layers_to_freeze:
+            for param in layer.parameters():
+                param.requires_grad = False
+    for param in model.classifier.parameters():
+        param.requires_grad = True
     
-    logging.info(f'Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}')
+    if is_main:
+        print_model_info(model)
     
-    # 加载数据
-    logging.info('Loading training data...')
+    # ============ 数据加载 ============
+    if is_main:
+        logging.info('加载训练数据...')
+    
     train_df = pd.read_csv(CONFIG['train_dataset_path']) if not CONFIG['develop'] else pd.read_csv('data/train_short.csv')
-    logging.info(f'Total samples: {len(train_df)}')
     
-    # 划分训练集和验证集
-    logging.info('Splitting data into train and validation sets...')
+    if is_main:
+        logging.info(f'总样本数: {len(train_df)}')
+        
+        # 打印类别分布
+        label_dist = train_df[['winner_model_a', 'winner_model_b', 'winner_tie']].sum()
+        logging.info("\n类别分布:")
+        for col, count in label_dist.items():
+            logging.info(f"  {col}: {count} ({count/len(train_df)*100:.2f}%)")
+    
+    if is_main:
+        logging.info('\n划分训练集和验证集...')
+    
     train_data, val_data = train_test_split(
         train_df,
         test_size=CONFIG['val_rate'],
         random_state=CONFIG['seed'],
         stratify=train_df[['winner_model_a', 'winner_model_b', 'winner_tie']].idxmax(axis=1)
     )
-    logging.info(f'Train size: {len(train_data)}, Validation size: {len(val_data)}')
     
-    # 创建数据集
-    logging.info('Creating datasets...')
+    if is_main:
+        logging.info(f'训练集大小: {len(train_data)}, 验证集大小: {len(val_data)}')
+    
+    # ============ 创建数据集 ============
+    if is_main:
+        logging.info('创建数据集...')
+    
     train_dataset = HumanPreferenceDataset(
         data=train_data,
         tokenizer=tokenizer,
@@ -96,104 +242,165 @@ def main():
         usage="val"
     )
     
-    # 计算训练步数
-    total_steps = (len(train_dataset) // CONFIG['batch_size']) * CONFIG['num_epochs']
+    # ============ 训练配置 ============
+    # 计算有效的batch size和steps
+    effective_batch_size = CONFIG['batch_size']
+    gradient_accumulation_steps = CONFIG.get('gradient_accumulation_steps', 1)
+    
+    if use_ddp:
+        # DDP下的实际batch size = per_device_batch_size * num_gpus * gradient_accumulation_steps
+        total_batch_size = effective_batch_size * world_size * gradient_accumulation_steps
+    else:
+        total_batch_size = effective_batch_size * gradient_accumulation_steps
+    
+    steps_per_epoch = len(train_dataset) // total_batch_size
+    total_steps = steps_per_epoch * CONFIG['num_epochs']
     warmup_steps = int(total_steps * CONFIG['warmup_ratio'])
     
-    logging.info(f'Total training steps: {total_steps}, Warmup steps: {warmup_steps}')
+    if is_main:
+        logging.info(f'\n训练步数配置:')
+        logging.info(f'  Per device batch size: {effective_batch_size}')
+        if use_ddp:
+            logging.info(f'  Number of GPUs: {world_size}')
+        logging.info(f'  Gradient accumulation steps: {gradient_accumulation_steps}')
+        logging.info(f'  Total batch size: {total_batch_size}')
+        logging.info(f'  每epoch步数: {steps_per_epoch}')
+        logging.info(f'  总训练步数: {total_steps}')
+        logging.info(f'  预热步数: {warmup_steps}')
     
-    # 设置训练参数
+    # ============ TrainingArguments 详细配置 ============
     training_args = TrainingArguments(
         output_dir=CONFIG['checkpoint_dir'],
+        
+        # === 训练配置 ===
         num_train_epochs=CONFIG['num_epochs'],
         per_device_train_batch_size=CONFIG['batch_size'],
         per_device_eval_batch_size=CONFIG['batch_size'],
+        gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=CONFIG['learning_rate'],
         weight_decay=CONFIG['weight_decay'],
         warmup_steps=warmup_steps,
         lr_scheduler_type="cosine",
-        
-        # 评估和保存策略
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        save_total_limit=2,
-        load_best_model_at_end=True,
-        metric_for_best_model="loss",
-        greater_is_better=False,
-        
-        # 日志设置
-        logging_dir=f"{CONFIG['checkpoint_dir']}/logs",
-        logging_strategy="steps",
-        logging_steps=10,
-        
-        # 混合精度训练
-        fp16=CONFIG.get('use_amp', False) and torch.cuda.is_available(),
-        # 如果想用 BF16 (需要 Ampere+ GPU)
-        # bf16=CONFIG.get('use_amp', False) and torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
-        
-        # 其他设置
-        dataloader_num_workers=0,
-        remove_unused_columns=False,
         max_grad_norm=1.0,
         
-        # 禁用wandb(如果不需要)
-        report_to="none",  # 如果要用wandb,改为 report_to=["wandb"]
+        # === DDP配置 ===
+        ddp_find_unused_parameters=False,  # 提高DDP性能
+        ddp_backend='nccl' if use_ddp and torch.cuda.is_available() else None,  # NCCL是NVIDIA GPU的最佳选择
         
-        # 设置随机种子
+        # === 评估策略 ===
+        eval_strategy="epoch",
+        
+        # === Checkpoint保存策略 ===
+        save_strategy="epoch",
+        save_total_limit=3,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        
+        # === Logging配置 ===
+        logging_dir=f"{CONFIG['checkpoint_dir']}/logs",
+        logging_strategy="steps",
+        logging_steps=20,
+        logging_first_step=True,
+        
+        # === 混合精度训练 ===
+        fp16=CONFIG.get('use_amp', False) and torch.cuda.is_available(),
+        
+        # === 其他设置 ===
+        dataloader_num_workers=CONFIG.get('num_workers', 4),  # DDP下建议使用多个workers
+        dataloader_pin_memory=True,  # 加速数据传输
+        remove_unused_columns=False,
         seed=CONFIG['seed'],
+        
+        # === 报告工具 ===
+        report_to=CONFIG.get('report_to', 'none'),
+        
+        # === 分布式相关 ===
+        local_rank=local_rank if use_ddp else -1,  # 重要：告诉Trainer当前进程的local_rank
     )
     
-    if CONFIG.get('use_amp', False):
-        logging.info('Using Automatic Mixed Precision (AMP) training')
+    if is_main:
+        if CONFIG.get('use_amp', False):
+            logging.info('✓ 启用自动混合精度训练 (AMP)')
+        
+        if training_args.report_to != "none":
+            logging.info(f'✓ 启用实验追踪: {training_args.report_to}')
+            if "wandb" in training_args.report_to:
+                logging.info("""
+                WandB 会记录:
+                  • Training/Eval Loss
+                  • Learning Rate
+                  • Gradient Norm
+                  • 所有自定义指标
+                  • 系统资源使用
+                  • 模型配置
+                访问 https://wandb.ai 查看实验
+                """)
     
-    
+    # ============ Data Collator ============
     def custom_data_collator(features):
-        # 移除 'id' 字段
         batch = {
             'input_ids': torch.stack([f['input_ids'] for f in features]),
             'attention_mask': torch.stack([f['attention_mask'] for f in features]),
-            'labels': torch.stack([f['labels'] for f in features])  # 注意: label -> labels
+            'labels': torch.stack([f['labels'] for f in features])
         }
         return batch
     
-    # 创建Trainer
+    # ============ 创建Trainer ============
+    callbacks = [DetailedLoggingCallback(log_every_n_steps=50)]
+    
+    if CONFIG.get('early_stopping', False):
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=3))
+        if is_main:
+            logging.info('✓ 启用早停机制 (patience=3)')
+    
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        # tokenizer=tokenizer,
-        data_collator=custom_data_collator,  # 使用自定义 collator
+        data_collator=custom_data_collator,
         compute_metrics=compute_metrics,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)] if CONFIG.get('early_stopping', False) else None,
+        callbacks=callbacks,
     )
     
-    # 开始训练
-    logging.info("Starting training...")
+    # ============ 开始训练 ============
+    if is_main:
+        logging.info("\n" + "🚀" * 40)
+        logging.info("开始训练...")
+        logging.info("🚀" * 40 + "\n")
+    
     train_result = trainer.train()
     
-    # 保存最终模型
-    logging.info("Saving final model...")
-    trainer.save_model(f"{CONFIG['checkpoint_dir']}/best_model")
-    tokenizer.save_pretrained(f"{CONFIG['checkpoint_dir']}/best_model")
-    
-    # 保存训练指标
-    metrics = train_result.metrics
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
-    
-    # 最终评估
-    logging.info("Running final evaluation...")
-    eval_metrics = trainer.evaluate()
-    trainer.log_metrics("eval", eval_metrics)
-    trainer.save_metrics("eval", eval_metrics)
-    
-    logging.info("")
-    logging.info("=" * 60)
-    logging.info(f'Training completed!')
-    logging.info(f'Best training loss: {metrics.get("train_loss", "N/A"):.4f}')
-    logging.info(f'Final eval loss: {eval_metrics.get("eval_loss", "N/A"):.4f}')
-    logging.info("=" * 60)
+    # ============ 保存最终模型 (只在主进程) ============
+    if is_main:
+        logging.info("\n💾 保存最终模型...")
+        final_model_dir = f"{CONFIG['checkpoint_dir']}/best_model"
+        trainer.save_model(final_model_dir)
+        tokenizer.save_pretrained(final_model_dir)
+        logging.info(f"✓ 模型已保存到: {final_model_dir}")
+        
+        # ============ 保存训练指标 ============
+        metrics = train_result.metrics
+        trainer.log_metrics("train", metrics)
+        trainer.save_metrics("train", metrics)
+        
+        # ============ 最终评估 ============
+        logging.info("\n📊 运行最终评估...")
+        eval_metrics = trainer.evaluate()
+        trainer.log_metrics("eval", eval_metrics)
+        trainer.save_metrics("eval", eval_metrics)
+        
+        # ============ 训练总结 ============
+        logging.info("\n" + "=" * 80)
+        logging.info("🎉 训练完成！")
+        logging.info("=" * 80)
+        logging.info(f"训练损失: {metrics.get('train_loss', 'N/A'):.4f}")
+        logging.info(f"验证损失: {eval_metrics.get('eval_loss', 'N/A'):.4f}")
+        logging.info(f"验证准确率: {eval_metrics.get('eval_accuracy', 'N/A'):.4f}")
+        logging.info(f"最佳模型: {final_model_dir}")
+        logging.info(f"训练日志: {training_args.logging_dir}")
+        logging.info("=" * 80 + "\n")
 
 
 if __name__ == '__main__':

@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import torch
+from torch.optim import AdamW
+
 from torch.utils.data import Dataset
 from transformers import (
     AutoTokenizer, 
@@ -12,6 +14,8 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 from sklearn.model_selection import train_test_split
 from huggingface_hub import snapshot_download
+
+from configs.configs import CONFIG
 
 # ==========================================
 # 1. 配置参数 (Configuration)
@@ -118,14 +122,21 @@ peft_config = LoraConfig(
 
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters() # 打印可训练参数量
-print(model)
+
+optimizer = AdamW(
+    model.parameters(),
+    lr=2e-5,
+    weight_decay=CONFIG['weight_decay']
+)
 
 long_text = "人工智能（Artificial Intelligence，AI）亦称智械爱仕达是大苏打水电工科技阿尔达规范收到回复是绝对符合结束战斗风格和是绝对符合所带来符合器智能，指由人制造出来的机器所表现出来的智能。通常人工智能是指通过普通计算机程序来呈现人类智能的技术。该词也指出研究这样的智能系统是否能够实现，以及如何实现。同时，人类的无数职业也逐渐被其取代。" * 20  # 约 1 300 字
 t = tokenizer(long_text, return_tensors="pt",  padding="max_length", max_length=1024, truncation=True).to("cuda")
 
 print(t['input_ids'].shape, t['input_ids'])
-outout = model(**t)
+outout = model(**t, labels=torch.tensor([0]).to("cuda")  )
 print(outout)
+outout.loss.backward()
+optimizer.step()
 exit()
 # ==========================================
 # 5. 准备数据 (Prepare Data)

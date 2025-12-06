@@ -13,6 +13,7 @@ DEFAULT_CONFIG = {
     
     'use_amp': False,
     'use_lora': False,
+    'use_ddp': False,
     'batch_size': 4,
     'learning_rate': 5e-6,
     'num_epochs': 20,
@@ -47,6 +48,8 @@ def parse_command_line_args() -> Dict[str, Any]:
                         help='是否使用自动混合精度')
     parser.add_argument('--use_lora', default=False, action='store_true', 
                         help='是否使用LoRA')
+    parser.add_argument('--use_ddp', default=False, action='store_true',
+                        help='是否使用分布式数据并行')
     parser.add_argument('--batch_size', type=int, default=None,
                         help='批次大小')
     parser.add_argument('--learning_rate', type=float, default=None,
