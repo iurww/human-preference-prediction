@@ -1,4 +1,5 @@
 import os
+from time import time
 import pandas as pd
 import numpy as np
 import logging
@@ -14,11 +15,13 @@ from transformers import (
     EarlyStoppingCallback,
     TrainerCallback
 )
+import wandb
 
 from configs.logging_config import make_log_dir, init_logger
 from configs import CONFIG, print_config
 from dataset import HumanPreferenceDataset
 
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 class DetailedLoggingCallback(TrainerCallback):
     
@@ -32,49 +35,22 @@ class DetailedLoggingCallback(TrainerCallback):
         self.start_time = time.time()
         self.is_main_process = state.is_world_process_zero
         
-        if self.is_main_process:
-            logging.info("=" * 80)
-            logging.info("训练开始")
-            logging.info(f"总epochs: {args.num_train_epochs}")
-            logging.info(f"Batch size per device: {args.per_device_train_batch_size}")
-            logging.info(f"Total batch size: {args.per_device_train_batch_size * args.world_size * args.gradient_accumulation_steps}")
-            logging.info(f"Gradient accumulation steps: {args.gradient_accumulation_steps}")
-            logging.info(f"World size (GPUs): {args.world_size}")
-            logging.info(f"学习率: {args.learning_rate}")
-            logging.info("=" * 80)
-        
     def on_epoch_begin(self, args, state, control, **kwargs):
-        if self.is_main_process:
-            logging.info(f"\n>>> Epoch {state.epoch}/{args.num_train_epochs} 开始")
+        pass
+        # if self.is_main_process:
+        #     logging.info(f">>> Epoch {state.epoch}/{args.num_train_epochs} 开始")
         
     def on_log(self, args, state, control, logs=None, **kwargs):
-        """每次logging时触发"""
-        if self.is_main_process and logs and state.global_step % self.log_every_n_steps == 0:
-            import time
-            elapsed = time.time() - self.start_time
-            
-            msg_parts = [
-                f"Step {state.global_step}/{state.max_steps}",
-                f"Epoch {state.epoch:.2f}",
-            ]
-            
-            if 'loss' in logs:
-                msg_parts.append(f"Loss: {logs['loss']:.4f}")
-            if 'learning_rate' in logs:
-                msg_parts.append(f"LR: {logs['learning_rate']:.2e}")
-            
-            msg_parts.append(f"Time: {elapsed/60:.1f}min")
-            
-            logging.info(" | ".join(msg_parts))
+        pass
     
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if self.is_main_process and metrics:
-            logging.info("\n" + "=" * 80)
-            logging.info(f"📊 评估结果 (Epoch {state.epoch:.2f}):")
+            logging.info("=" * 80)
+            logging.info(f"📊 评估结果 (Epoch {int(state.epoch)}):")
             for key, value in metrics.items():
                 if isinstance(value, (int, float)):
                     logging.info(f"  {key}: {value:.4f}")
-            logging.info("=" * 80 + "\n")
+            logging.info("=" * 80)
     
     def on_save(self, args, state, control, **kwargs):
         if self.is_main_process:
@@ -106,7 +82,7 @@ def print_model_info(model):
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     frozen_params = total_params - trainable_params
     
-    logging.info("\n" + "=" * 80)
+    logging.info("=" * 80)
     logging.info("🔧 模型参数统计:")
     logging.info(f"  总参数: {total_params:,}")
     logging.info(f"  可训练参数: {trainable_params:,} ({trainable_params/total_params*100:.2f}%)")
@@ -142,29 +118,27 @@ def main():
     if is_main:
         init_logger(make_log_dir())
         print_config()
+        wandb.init(
+            project='human-preference-prediction',
+            config=CONFIG,
+            name=f"train-deberta-lr{CONFIG['learning_rate']:.1e}-bs{CONFIG['batch_size']}-ep{CONFIG['num_epochs']}"
+        )
     
     # 设置设备
     if use_ddp:
         device = torch.device(f'cuda:{local_rank}')
         torch.cuda.set_device(device)
         
-        if is_main:
-            logging.info(f'\n🚀 启用DDP多卡训练')
-            logging.info(f'World Size: {world_size}')
-            logging.info(f'当前进程 Rank: {rank}, Local Rank: {local_rank}')
-            
-            # 打印所有可用GPU
-            for i in range(torch.cuda.device_count()):
-                logging.info(f'GPU {i}: {torch.cuda.get_device_name(i)} '
-                           f'({torch.cuda.get_device_properties(i).total_memory / 1024**3:.2f} GB)')
+        logging.info(f'World Size: {world_size}')
+        for i in range(torch.cuda.device_count()):
+            logging.info(f'GPU {i}: {torch.cuda.get_device_name(i)} '
+                        f'({torch.cuda.get_device_properties(i).total_memory / 1024**3:.2f} GB)')
     else:
-        # 单卡模式
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        if is_main:
-            logging.info(f'使用设备: {device}')
-            if torch.cuda.is_available():
-                logging.info(f'GPU型号: {torch.cuda.get_device_name(0)}')
-                logging.info(f'GPU显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB')
+        logging.info(f'使用设备: {device}')
+        if torch.cuda.is_available():
+            logging.info(f'GPU型号: {torch.cuda.get_device_name(0)}')
+            logging.info(f'GPU显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB')
     
     # ============ 模型初始化 ============
     if is_main:
@@ -177,7 +151,6 @@ def main():
         num_labels=3,
     )   
     
-    # 冻结策略
     for param in model.deberta.embeddings.parameters():
         param.requires_grad = False
     num_layers_to_freeze = 9  
@@ -198,16 +171,7 @@ def main():
     train_df = pd.read_csv(CONFIG['train_dataset_path']) if not CONFIG['develop'] else pd.read_csv('data/train_short.csv')
     
     if is_main:
-        logging.info(f'总样本数: {len(train_df)}')
-        
-        # 打印类别分布
-        label_dist = train_df[['winner_model_a', 'winner_model_b', 'winner_tie']].sum()
-        logging.info("\n类别分布:")
-        for col, count in label_dist.items():
-            logging.info(f"  {col}: {count} ({count/len(train_df)*100:.2f}%)")
-    
-    if is_main:
-        logging.info('\n划分训练集和验证集...')
+        logging.info('划分训练集和验证集...')
     
     train_data, val_data = train_test_split(
         train_df,
@@ -216,13 +180,7 @@ def main():
         stratify=train_df[['winner_model_a', 'winner_model_b', 'winner_tie']].idxmax(axis=1)
     )
     
-    if is_main:
-        logging.info(f'训练集大小: {len(train_data)}, 验证集大小: {len(val_data)}')
-    
     # ============ 创建数据集 ============
-    if is_main:
-        logging.info('创建数据集...')
-    
     train_dataset = HumanPreferenceDataset(
         data=train_data,
         tokenizer=tokenizer,
@@ -258,7 +216,7 @@ def main():
     warmup_steps = int(total_steps * CONFIG['warmup_ratio'])
     
     if is_main:
-        logging.info(f'\n训练步数配置:')
+        logging.info(f'训练步数配置:')
         logging.info(f'  Per device batch size: {effective_batch_size}')
         if use_ddp:
             logging.info(f'  Number of GPUs: {world_size}')
@@ -281,11 +239,11 @@ def main():
         weight_decay=CONFIG['weight_decay'],
         warmup_steps=warmup_steps,
         lr_scheduler_type="cosine",
-        max_grad_norm=1.0,
+        max_grad_norm=5.0,
         
         # === DDP配置 ===
-        ddp_find_unused_parameters=False,  # 提高DDP性能
-        ddp_backend='nccl' if use_ddp and torch.cuda.is_available() else None,  # NCCL是NVIDIA GPU的最佳选择
+        ddp_find_unused_parameters=False,
+        ddp_backend='nccl' if use_ddp and torch.cuda.is_available() else None,
         
         # === 评估策略 ===
         eval_strategy="epoch",
@@ -305,10 +263,11 @@ def main():
         
         # === 混合精度训练 ===
         fp16=CONFIG.get('use_amp', False) and torch.cuda.is_available(),
+        # bf16=True,
         
         # === 其他设置 ===
-        dataloader_num_workers=CONFIG.get('num_workers', 4),  # DDP下建议使用多个workers
-        dataloader_pin_memory=True,  # 加速数据传输
+        dataloader_num_workers=CONFIG.get('num_workers', 4),
+        dataloader_pin_memory=True,
         remove_unused_columns=False,
         seed=CONFIG['seed'],
         
@@ -325,18 +284,7 @@ def main():
         
         if training_args.report_to != "none":
             logging.info(f'✓ 启用实验追踪: {training_args.report_to}')
-            if "wandb" in training_args.report_to:
-                logging.info("""
-                WandB 会记录:
-                  • Training/Eval Loss
-                  • Learning Rate
-                  • Gradient Norm
-                  • 所有自定义指标
-                  • 系统资源使用
-                  • 模型配置
-                访问 https://wandb.ai 查看实验
-                """)
-    
+
     # ============ Data Collator ============
     def custom_data_collator(features):
         batch = {
@@ -364,12 +312,7 @@ def main():
         callbacks=callbacks,
     )
     
-    # ============ 开始训练 ============
-    if is_main:
-        logging.info("\n" + "🚀" * 40)
-        logging.info("开始训练...")
-        logging.info("🚀" * 40 + "\n")
-    
+
     train_result = trainer.train()
     
     # ============ 保存最终模型 (只在主进程) ============
@@ -386,13 +329,13 @@ def main():
         trainer.save_metrics("train", metrics)
         
         # ============ 最终评估 ============
-        logging.info("\n📊 运行最终评估...")
+        logging.info("📊 运行最终评估...")
         eval_metrics = trainer.evaluate()
         trainer.log_metrics("eval", eval_metrics)
         trainer.save_metrics("eval", eval_metrics)
         
         # ============ 训练总结 ============
-        logging.info("\n" + "=" * 80)
+        logging.info("=" * 80)
         logging.info("🎉 训练完成！")
         logging.info("=" * 80)
         logging.info(f"训练损失: {metrics.get('train_loss', 'N/A'):.4f}")

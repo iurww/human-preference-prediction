@@ -6,8 +6,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report, confusion_matrix
 
 import torch
-from torch.utils.data import  DataLoader
+from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.cuda.amp import autocast, GradScaler  # AMP相关
+# form torch.amp import autocast, GradScaler
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -20,7 +22,11 @@ from configs import CONFIG, print_config
 from dataset import HumanPreferenceDataset
 
 
-def train_epoch(model, dataloader, optimizer, scheduler, device, epoch):
+def train_epoch(model, dataloader, optimizer, scheduler, device, epoch, scaler=None, use_amp=False):
+    """
+    scaler: GradScaler对象，用于AMP训练
+    use_amp: 是否启用混合精度训练
+    """
     model.train()
     
     total_loss = 0
@@ -34,19 +40,38 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch):
         
         optimizer.zero_grad()
         
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels
-        )
+        # AMP训练
+        if use_amp:
+            with autocast():  # 自动混合精度上下文
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels
+                )
+                loss = outputs.loss
+            
+            # 使用scaler进行反向传播
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            # 正常FP32训练
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels
+            )
+            loss = outputs.loss
+            
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
         
-        loss = outputs.loss
-        wandb.log({'batch_loss': loss.item()})
-        
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
         scheduler.step()
+        
+        wandb.log({'batch_loss': loss.item()})
         
         total_loss += loss.item()
         
@@ -57,7 +82,10 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch):
     return avg_loss
 
 
-def evaluate(model, dataloader, device):
+def evaluate(model, dataloader, device, use_amp=False):
+    """
+    use_amp: 是否启用混合精度评估
+    """
     model.eval()
  
     total_loss = 0
@@ -70,16 +98,27 @@ def evaluate(model, dataloader, device):
             attention_mask = batch['attention_mask'].to(device)
             labels = batch['labels'].to(device)
             
-            outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=labels
-            )
+            # AMP评估
+            if use_amp:
+                with autocast():
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=labels
+                    )
+                    loss = outputs.loss
+                    logits = outputs.logits
+            else:
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels
+                )
+                loss = outputs.loss
+                logits = outputs.logits
             
-            loss = outputs.loss
             total_loss += loss.item()
             
-            logits = outputs.logits
             predictions = torch.argmax(logits, dim=-1)
             
             all_predictions.extend(predictions.cpu().numpy())
@@ -87,13 +126,6 @@ def evaluate(model, dataloader, device):
             
     avg_loss = total_loss / len(dataloader)
     accuracy = accuracy_score(all_labels, all_predictions)
-    
-    # # 计算每个类别的precision, recall, f1
-    # precision, recall, f1, support = precision_recall_fscore_support(
-    #     all_labels, 
-    #     all_predictions, 
-    #     average='macro'  # 三分类用macro平均
-    # )
     
     return avg_loss, accuracy
 
@@ -116,6 +148,12 @@ def main():
         logging.info(f'GPU: {torch.cuda.get_device_name(0)}')
         logging.info(f'GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB')
     
+    # 检查AMP配置
+    use_amp = CONFIG.get('use_amp', False) and torch.cuda.is_available()
+    if use_amp:
+        logging.info('✓ 启用自动混合精度训练 (FP16)')
+    else:
+        logging.info('使用FP32训练')
     
     logging.info(f'Initializing model: {CONFIG["model_name"]}')
     tokenizer = AutoTokenizer.from_pretrained(
@@ -219,16 +257,22 @@ def main():
         num_training_steps=total_steps
     )
     
+    # 创建GradScaler（仅在使用AMP时）
+    scaler = GradScaler() if use_amp else None
+    
     logging.info(f'Total training steps: {total_steps}, Warmup steps: {warmup_steps}, Total epochs: {CONFIG["num_epochs"]}')
     
     best_train_loss = float('inf')
     best_val_loss = float('inf')
     for epoch in range(CONFIG['num_epochs']):
 
-        train_loss = train_epoch(model, train_loader, optimizer, scheduler, device, epoch)
+        train_loss = train_epoch(
+            model, train_loader, optimizer, scheduler, device, epoch, 
+            scaler=scaler, use_amp=use_amp
+        )
         logging.info(f'[Train] Loss: {train_loss:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}')
         
-        val_loss, accuracy = evaluate(model, val_loader, device)
+        val_loss, accuracy = evaluate(model, val_loader, device, use_amp=use_amp)
         logging.info(f'[Val] Loss: {val_loss:.4f}, Accuracy: {accuracy:.4f}')
         
         wandb.log({
@@ -239,10 +283,8 @@ def main():
             'learning_rate': scheduler.get_last_lr()[0]
         })
         
-        # if val_log_loss < best_val_log_loss:
         if train_loss < best_train_loss:
             best_train_loss = train_loss
-            # best_val_log_loss = val_log_loss
             logging.info(f'🎉 New best training loss: {best_train_loss:.4f}')
 
             model.save_pretrained(f"{CONFIG['checkpoint_dir']}/best_model")

@@ -49,7 +49,7 @@ class HumanPreferenceDataset(Dataset):
         logging.info(f"开始处理数据 {self.usage} 样本数: {len(self.data)} 最大长度: {self.max_length} prompt比例: {self.prompt_ratio}")
         self._process_data()
     
-    def _middle_truncate(self, tokens: List[int], max_len: int) -> List[int]:
+    def _keep_head_tail(self, tokens: List[int], max_len: int) -> List[int]:
         if len(tokens) <= max_len:
             return tokens
         
@@ -59,10 +59,10 @@ class HumanPreferenceDataset(Dataset):
         
         return tokens[:head_len] + tokens[-tail_len:]
     
-    def _head_truncate(self, tokens: List[int], max_len: int) -> List[int]:
+    def _keep_head(self, tokens: List[int], max_len: int) -> List[int]:
         return tokens[:max_len]
     
-    def _tail_truncate(self, tokens: List[int], max_len: int) -> List[int]:
+    def _keep_tail(self, tokens: List[int], max_len: int) -> List[int]:
         return tokens[-max_len:]
     
     def _merge_and_truncate(self, row: pd.Series, swap: bool = False) -> pd.Series:
@@ -84,9 +84,9 @@ class HumanPreferenceDataset(Dataset):
         max_response_b_len = remaining_length - max_response_a_len
         
         # 截断
-        prompt_tokens = self._middle_truncate(prompt_tokens, actual_prompt_len)
-        response_a_tokens = self._middle_truncate(response_a_tokens, max_response_a_len)
-        response_b_tokens = self._middle_truncate(response_b_tokens, max_response_b_len)
+        prompt_tokens = self._keep_head(prompt_tokens, actual_prompt_len)
+        response_a_tokens = self._keep_tail(response_a_tokens, max_response_a_len)
+        response_b_tokens = self._keep_tail(response_b_tokens, max_response_b_len)
         
         # 构建最终序列: [CLS] prompt [SEP] response_a [SEP] response_b [SEP]
         # 根据swap参数决定是否交换ab位置
@@ -144,7 +144,7 @@ class HumanPreferenceDataset(Dataset):
         # 合并多轮对话
         data_df = data_df.map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 else '')
         
-        data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
+        # data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
 
         # tokenize
         logging.info("Tokenizing...")
@@ -162,18 +162,24 @@ class HumanPreferenceDataset(Dataset):
         data_df_swapped = data_df.apply(lambda row: self._merge_and_truncate(row, swap=True), axis=1)
         
         # 处理标签
-        label_df = self.data[label_cols].idxmax(axis=1).map(
+        label_df_original = self.data[label_cols].idxmax(axis=1).map(
             {label_cols[0]: 0, label_cols[1]: 1, label_cols[2]: 2}
         ).to_frame(name='label') 
+        
+        label_df_swapped = label_df_original.copy()
+        label_df_swapped['label'] = label_df_swapped['label'].map(
+            {0: 1, 1: 0, 2: 2}
+        )
+        print(label_df_original.head(), label_df_swapped.head())
         
         id_df = self.data[['id']]
         
         # 合并原始顺序数据
-        df_original = pd.concat([id_df, data_df_original, label_df], axis=1)
+        df_original = pd.concat([id_df, data_df_original, label_df_original], axis=1)
         df_original['swap'] = False
         
         # 合并交换顺序数据（标签保持不变）
-        df_swapped = pd.concat([id_df, data_df_swapped, label_df], axis=1)
+        df_swapped = pd.concat([id_df, data_df_swapped, label_df_swapped], axis=1)
         df_swapped['swap'] = True
         
         # 合并两个数据集
