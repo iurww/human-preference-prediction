@@ -313,7 +313,7 @@ def main():
         seed=CONFIG['seed'],
         
         # === 报告工具 ===
-        report_to=CONFIG.get('report_to', 'none'),
+        report_to=["wandb"],
         
         # === 分布式相关 ===
         local_rank=local_rank if use_ddp else -1,  # 重要：告诉Trainer当前进程的local_rank
