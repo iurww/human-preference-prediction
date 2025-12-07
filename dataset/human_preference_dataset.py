@@ -185,6 +185,8 @@ class HumanPreferenceDataset(Dataset):
         # 合并两个数据集
         df = pd.concat([df_original, df_swapped], axis=0, ignore_index=True)
         
+        print(df.head())
+        
         logging.info(f"数据扩充完成，原始行数: {len(df_original)}, 扩充后行数: {len(df)}")
         logging.info(f"保存缓存文件: {self.cache_name}")
         df.to_parquet(self.cache_name, engine='pyarrow', compression='snappy')

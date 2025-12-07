@@ -142,7 +142,7 @@ def main():
     
     # ============ 模型初始化 ============
     if is_main:
-        logging.info(f'\n初始化模型: {CONFIG["model_name"]}')
+        logging.info(f'初始化模型: {CONFIG["model_name"]}')
     
     tokenizer = AutoTokenizer.from_pretrained(CONFIG['model_name'])
    
@@ -330,6 +330,10 @@ def main():
         
         # ============ 最终评估 ============
         logging.info("📊 运行最终评估...")
+        if use_ddp:
+            import torch.distributed as dist
+            if dist.is_initialized():
+                dist.barrier()
         eval_metrics = trainer.evaluate()
         trainer.log_metrics("eval", eval_metrics)
         trainer.save_metrics("eval", eval_metrics)

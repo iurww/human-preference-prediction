@@ -15,7 +15,7 @@ DEFAULT_CONFIG = {
     'use_lora': False,
     'use_ddp': False,
     'batch_size': 4,
-    'learning_rate': 5e-6,
+    'learning_rate': 2e-5,
     'num_epochs': 20,
     'warmup_ratio': 0.1,
     'weight_decay': 0.02,
