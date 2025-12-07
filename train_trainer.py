@@ -149,11 +149,13 @@ def main():
     model = AutoModelForSequenceClassification.from_pretrained(
         CONFIG['model_name'],
         num_labels=3,
+        hidden_dropout_prob=0.2,
+        attention_probs_dropout_prob=0.2,
     )   
     
     for param in model.deberta.embeddings.parameters():
         param.requires_grad = False
-    num_layers_to_freeze = 9  
+    num_layers_to_freeze = 11  
     for i, layer in enumerate(model.deberta.encoder.layer):
         if i < num_layers_to_freeze:
             for param in layer.parameters():
@@ -239,7 +241,7 @@ def main():
         weight_decay=CONFIG['weight_decay'],
         warmup_steps=warmup_steps,
         lr_scheduler_type="cosine",
-        max_grad_norm=5.0,
+        max_grad_norm=4.0,
         
         # === DDP配置 ===
         ddp_find_unused_parameters=False,

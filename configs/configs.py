@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
     'learning_rate': 2e-5,
     'num_epochs': 20,
     'warmup_ratio': 0.1,
-    'weight_decay': 0.02,
+    'weight_decay': 0.04,
     'seed': 42,
     'val_rate': 0.05
 }
