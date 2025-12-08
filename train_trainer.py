@@ -149,13 +149,13 @@ def main():
     model = AutoModelForSequenceClassification.from_pretrained(
         CONFIG['model_name'],
         num_labels=3,
-        hidden_dropout_prob=0.2,
-        attention_probs_dropout_prob=0.2,
+        hidden_dropout_prob=0.1,
+        attention_probs_dropout_prob=0.1,
     )   
     
     for param in model.deberta.embeddings.parameters():
         param.requires_grad = False
-    num_layers_to_freeze = 11  
+    num_layers_to_freeze = 10  
     for i, layer in enumerate(model.deberta.encoder.layer):
         if i < num_layers_to_freeze:
             for param in layer.parameters():
@@ -184,7 +184,7 @@ def main():
     
     # ============ 创建数据集 ============
     train_dataset = HumanPreferenceDataset(
-        data=train_data,
+        data=train_df,
         tokenizer=tokenizer,
         max_length=CONFIG['max_length'],
         prompt_ratio=CONFIG['prompt_ratio'],
@@ -330,25 +330,12 @@ def main():
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         
-        # ============ 最终评估 ============
-        logging.info("📊 运行最终评估...")
-        if use_ddp:
-            import torch.distributed as dist
-            if dist.is_initialized():
-                dist.barrier()
-        eval_metrics = trainer.evaluate()
-        trainer.log_metrics("eval", eval_metrics)
-        trainer.save_metrics("eval", eval_metrics)
-        
         # ============ 训练总结 ============
         logging.info("=" * 80)
         logging.info("🎉 训练完成！")
         logging.info("=" * 80)
         logging.info(f"训练损失: {metrics.get('train_loss', 'N/A'):.4f}")
-        logging.info(f"验证损失: {eval_metrics.get('eval_loss', 'N/A'):.4f}")
-        logging.info(f"验证准确率: {eval_metrics.get('eval_accuracy', 'N/A'):.4f}")
         logging.info(f"最佳模型: {final_model_dir}")
-        logging.info(f"训练日志: {training_args.logging_dir}")
         logging.info("=" * 80 + "\n")
 
 

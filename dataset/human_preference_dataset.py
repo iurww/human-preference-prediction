@@ -123,7 +123,11 @@ class HumanPreferenceDataset(Dataset):
     def _process_data(self):
         data_cols = ['prompt', 'response_a', 'response_b']
         label_cols = ['winner_model_a', 'winner_model_b', 'winner_tie']
-        special_ids = set(self.tokenizer.all_special_ids)
+        special_ids = set([self.tokenizer.cls_token_id, 
+                        self.tokenizer.sep_token_id, 
+                        self.tokenizer.pad_token_id,                                                                                                                                    
+                        self.tokenizer.mask_token_id])
+
         
         if not self.force_process and os.path.exists(self.cache_name):
             logging.info(f"加载缓存文件: {self.cache_name}")
@@ -140,6 +144,27 @@ class HumanPreferenceDataset(Dataset):
         
         # 合并多轮对话
         data_df = data_df.map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 else '')
+        
+        # 清洗数据
+        mask = data_df['response_a'].eq(data_df['response_b']) & data_df['winner_tie'].eq(0)
+        data_df.loc[mask, ['winner_tie', 'winner_model_a', 'winner_model_b']] = [1, 0, 0]
+        
+        mask_real_nan_a = (
+            data_df['response_a'].isna() |
+            data_df['response_a'].str.strip().str.lower().eq("none") |
+            data_df['response_a'].str.strip().eq("") |
+            data_df['response_a'].astype(str).str.fullmatch(r'\s*')
+        )
+        mask_real_nan_b = (
+            data_df['response_b'].isna() |
+            data_df['response_b'].str.strip().str.lower().eq("none") |
+            data_df['response_b'].str.strip().eq("") | 
+            data_df['response_b'].astype(str).str.fullmatch(r'\s*')
+        )
+        data_df[mask_real_nan_a & ~mask_real_nan_b & data_df['winner_tie'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 0, 1]
+        data_df[~mask_real_nan_a & mask_real_nan_b & data_df['winner_tie'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 1, 0]
+        data_df[mask_real_nan_a & ~mask_real_nan_b & data_df['winner_model_a'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 0, 1]
+        data_df[mask_real_nan_b & ~mask_real_nan_a & data_df['winner_model_b'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 1, 0]
         
         # data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
 
@@ -167,7 +192,6 @@ class HumanPreferenceDataset(Dataset):
         label_df_swapped['label'] = label_df_swapped['label'].map(
             {0: 1, 1: 0, 2: 2}
         )
-        print(label_df_original.head(), label_df_swapped.head())
         
         id_df = self.data[['id']]
         
@@ -181,8 +205,6 @@ class HumanPreferenceDataset(Dataset):
         
         # 合并两个数据集
         df = pd.concat([df_original, df_swapped], axis=0, ignore_index=True)
-        
-        print(df.head())
         
         logging.info(f"数据扩充完成，原始行数: {len(df_original)}, 扩充后行数: {len(df)}")
         logging.info(f"保存缓存文件: {self.cache_name}")
