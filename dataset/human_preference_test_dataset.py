@@ -49,7 +49,7 @@ class HumanPreferenceTestDataset(Dataset):
         logging.info(f"开始处理数据 {self.usage} 样本数: {len(self.data)} 最大长度: {self.max_length} prompt比例: {self.prompt_ratio}")
         self._process_data()
     
-    def _middle_truncate(self, tokens: List[int], max_len: int) -> List[int]:
+    def _keep_head_tail(self, tokens: List[int], max_len: int) -> List[int]:
         if len(tokens) <= max_len:
             return tokens
         
@@ -59,7 +59,13 @@ class HumanPreferenceTestDataset(Dataset):
         
         return tokens[:head_len] + tokens[-tail_len:]
     
-    def _merge_and_truncate(self, row: pd.Series) -> pd.Series:
+    def _keep_head(self, tokens: List[int], max_len: int) -> List[int]:
+        return tokens[:max_len]
+    
+    def _keep_tail(self, tokens: List[int], max_len: int) -> List[int]:
+        return tokens[-max_len:]
+    
+    def _merge_and_truncate(self, row: pd.Series, swap: bool = False) -> pd.Series:
         prompt_tokens = row['prompt']
         response_a_tokens = row['response_a']
         response_b_tokens = row['response_b']
@@ -78,15 +84,16 @@ class HumanPreferenceTestDataset(Dataset):
         max_response_b_len = remaining_length - max_response_a_len
         
         # 截断
-        prompt_tokens = self._middle_truncate(prompt_tokens, actual_prompt_len)
-        response_a_tokens = self._middle_truncate(response_a_tokens, max_response_a_len)
-        response_b_tokens = self._middle_truncate(response_b_tokens, max_response_b_len)
+        prompt_tokens = self._keep_head(prompt_tokens, actual_prompt_len)
+        response_a_tokens = self._keep_head(response_a_tokens, max_response_a_len)
+        response_b_tokens = self._keep_head(response_b_tokens, max_response_b_len)
         
-        # 构建最终序列: [CLS] prompt [SEP] response_a [SEP] response_b [SEP] 50%交换ab位置
-        if random.random() < 0.5:
-            pos_1_tokens, pos_2_tokens = response_a_tokens, response_b_tokens
-        else:
+        # 构建最终序列: [CLS] prompt [SEP] response_a [SEP] response_b [SEP]
+        # 根据swap参数决定是否交换ab位置
+        if swap:
             pos_1_tokens, pos_2_tokens = response_b_tokens, response_a_tokens
+        else:
+            pos_1_tokens, pos_2_tokens = response_a_tokens, response_b_tokens
             
         input_ids = (
             [self.tokenizer.cls_token_id] +
@@ -111,7 +118,6 @@ class HumanPreferenceTestDataset(Dataset):
             'input_ids': input_ids,
             'seq_len': actual_len,
         })
-
     
     def _process_data(self):
         data_cols = ['prompt', 'response_a', 'response_b']
@@ -123,16 +129,8 @@ class HumanPreferenceTestDataset(Dataset):
         if not self.force_process and os.path.exists(self.cache_name):
             logging.info(f"加载缓存文件: {self.cache_name}")
             self.samples = pd.read_parquet(self.cache_name, engine='pyarrow')
-            
-            # targets = [0, 1, 2, 3, 128000]
-            # def row_cnt(lst):
-            #     c = Counter(lst)
-            #     return [c[t] for t in targets]
-            # stat_array = np.vstack(self.samples['input_ids'].apply(row_cnt).values)
-            # stat_df = pd.DataFrame(stat_array,
-            #                     columns=['cnt_0','cnt_1','cnt_2','cnt_3','cnt_128000'])
-            # stat_df = pd.concat([self.samples[['id']], stat_df], axis=1)
-            # print(stat_df.sort_values('cnt_3', ascending=False).head(100))
+            # print(len(self.samples), self.samples.head(), self.samples.tail())
+
             return
         
         logging.info("处理数据...")
@@ -148,7 +146,7 @@ class HumanPreferenceTestDataset(Dataset):
         # bad_b = (df['response_b'].isin([False, '']) | df['response_b'].isna()) & ( df['winner_tie'] == 1)
         # data_df.drop(index=df[bad_a | bad_b].index, inplace=True)
         
-        data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
+        # data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
 
         # tokenize
         logging.info("Tokenizing...")
@@ -157,15 +155,31 @@ class HumanPreferenceTestDataset(Dataset):
         # 去除special ids
         data_df = data_df.map(lambda x: [i for i in x if i not in special_ids])
         
-        data_df = data_df.apply(self._merge_and_truncate, axis=1)
+         # 生成原始顺序的数据
+        logging.info("生成原始顺序数据...")
+        data_df_original = data_df.apply(lambda row: self._merge_and_truncate(row, swap=False), axis=1)
+        
+        # 生成交换顺序的数据
+        logging.info("生成交换顺序数据...")
+        data_df_swapped = data_df.apply(lambda row: self._merge_and_truncate(row, swap=True), axis=1)
         
         
         id_df = self.data[['id']]
         
-        df = pd.concat([id_df, data_df], axis=1)
+        # 合并原始顺序数据
+        df_original = pd.concat([id_df, data_df_original], axis=1)
+        df_original['swap'] = False
+        
+        # 合并交换顺序数据（标签保持不变）
+        df_swapped = pd.concat([id_df, data_df_swapped], axis=1)
+        df_swapped['swap'] = True
+        
+        df = pd.concat([df_original, df_swapped], axis=0, ignore_index=True)
         
         logging.info(f"保存缓存文件: {self.cache_name}")
         df.to_parquet(self.cache_name, engine='pyarrow', compression='snappy')
+        
+        print(len(df), df.head(), df.describe())
         
         self.samples = df
     
@@ -178,6 +192,7 @@ class HumanPreferenceTestDataset(Dataset):
         input_ids = sample['input_ids']
         id_ = sample['id']
         seq_len = sample['seq_len']
+        swap = sample['swap']
 
         attention_mask = [1] * seq_len + [0] * (self.max_length - seq_len)
         
@@ -185,6 +200,7 @@ class HumanPreferenceTestDataset(Dataset):
             'id': torch.tensor(id_, dtype=torch.long),
             'input_ids': torch.tensor(input_ids, dtype=torch.long),
             'attention_mask': torch.tensor(attention_mask, dtype=torch.long),
+            'swap': torch.tensor(swap, dtype=torch.bool),
         }
 
 
@@ -200,11 +216,11 @@ if __name__ == "__main__":
     
     tokenizer = AutoTokenizer.from_pretrained("./models/deberta")
     
-    train_df = pd.read_csv('data/train.csv')
+    # train_df = pd.read_csv('data/train.csv')
     test_df = pd.read_csv('data/test.csv')
 
     dataset = HumanPreferenceTestDataset(
-        data=train_df,
+        data=test_df,
         tokenizer=tokenizer,
         max_length=1024,
         prompt_ratio=0.3,

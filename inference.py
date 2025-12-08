@@ -88,7 +88,13 @@ def inference(model, dataloader, device):
         
         logits = outputs.logits
         probs = torch.softmax(logits, dim=-1).cpu().numpy()
-        ids = ids.numpy()                                             # (B,)
+        ids = batch['id'].numpy() 
+        
+        # print(ids, probs, batch['swap'].numpy())
+        # exit()
+        for i in range(len(ids)):
+            if batch['swap'][i]:
+                probs[i][0], probs[i][1] = probs[i][1], probs[i][0]
 
         batch_df = pd.DataFrame({
             'id': ids,
@@ -119,10 +125,10 @@ def main():
     if torch.cuda.is_available():
         logging.info(f'GPU: {torch.cuda.get_device_name(0)}')
     
-    model_path = CONFIG.get('inference_model_path', f"{CONFIG['checkpoint_dir']}/best_model")
+    model_path = CONFIG.get('inference_model_path', f"{CONFIG['checkpoint_dir']}/checkpoint-40880")
     logging.info(f'Loading model from: {model_path}')
     
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained("./models/deberta")
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
     
     model.to(device)
@@ -157,7 +163,7 @@ def main():
     predictions_df = inference(model, test_loader, device)
     logging.info(f'Generated predictions for {len(predictions_df)} samples')
     
-    raw_predictions_path = f"{CONFIG['checkpoint_dir']}/best_model/predictions_raw.csv"
+    raw_predictions_path = f"./predictions_raw.csv"
     predictions_df.to_csv(raw_predictions_path, index=False)
     logging.info(f'Raw predictions saved to: {raw_predictions_path}')
 
@@ -166,13 +172,19 @@ def main():
     wandb.save(raw_predictions_path)
     logging.info(f'Raw predictions uploaded to wandb')
     
+    out = (predictions_df
+       .groupby('id', as_index=False)   # 按 id 聚合
+       [['winner_model_a', 'winner_model_b', 'winner_tie']]
+       .mean())   
+    out.to_csv(f"./predictions_mean.csv", index=False)
+    
     
     # 补全
     predictions_filled = test_df[['id']].drop_duplicates().merge(predictions_df, on='id', how='left')
     fill_cols = ['winner_model_a', 'winner_model_b', 'winner_tie']
     predictions_filled[fill_cols] = predictions_filled[fill_cols].fillna(1/3)
     
-    filled_predictions_path = f"{CONFIG['checkpoint_dir']}/best_model/predictions_filled.csv"
+    filled_predictions_path = f"./predictions_filled.csv"
     predictions_filled.to_csv(filled_predictions_path, index=False)
     logging.info(f'Filled predictions saved to: {filled_predictions_path}') 
         

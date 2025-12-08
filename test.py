@@ -10,10 +10,12 @@ import matplotlib.pyplot as plt
 from collections import Counter
 
 
-model_path = "./models/deberta" 
+model_path = "./models/qwen2.5-1.5b" 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
-# model = AutoModel.from_pretrained(model_path)
-# model.to("cuda")
+model = AutoModel.from_pretrained(model_path)
+model.to("cuda")
+
+print(model)
 
 
 
@@ -114,17 +116,17 @@ tokenizer = AutoTokenizer.from_pretrained(model_path)
 # a = tokenizer.encode(s + s, add_special_tokens=False)
 # print(a, len(a))
 
-special_ids = set([tokenizer.cls_token_id, 
-                   tokenizer.sep_token_id, 
-                   tokenizer.pad_token_id, 
-                   tokenizer.unk_token_id,
-                   tokenizer.mask_token_id])   # 例如 {0, 1, 2, 3, 50256, ...}
-cols = ['prompt', 'response_a', 'response_b']
+# special_ids = set([tokenizer.cls_token_id, 
+#                    tokenizer.sep_token_id, 
+#                    tokenizer.pad_token_id, 
+#                    tokenizer.unk_token_id,
+#                    tokenizer.mask_token_id])   # 例如 {0, 1, 2, 3, 50256, ...}
+# cols = ['prompt', 'response_a', 'response_b']
 
-df = pd.read_csv('data/train.csv')
-df[cols] = df[cols].map(lambda s: json.loads(s) if pd.notnull(s) else [])
-assert df[cols].apply(lambda row: len(set(map(len, row))) == 1, axis=1).isin([False]).sum() == 0
-df[cols] = df[cols].map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 else '')
+# df = pd.read_csv('data/train.csv')
+# df[cols] = df[cols].map(lambda s: json.loads(s) if pd.notnull(s) else [])
+# assert df[cols].apply(lambda row: len(set(map(len, row))) == 1, axis=1).isin([False]).sum() == 0
+# df[cols] = df[cols].map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 else '')
 # df[cols] = df[cols].map(lambda s: tokenizer.encode(s, add_special_tokens=False))
 # # 1. 先拿前 10 行 + cols 列（返回 DataFrame）
 # sub_df = df.iloc[:10, df.columns.get_indexer(cols)]
@@ -191,13 +193,13 @@ df[cols] = df[cols].map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 el
 # # 3. 查看结果
 # print(df[cols])
 
-bad_a = (df['response_a'].isin([False, '']) | df['response_a'].isna()) & ( df['winner_tie'] == 1)
-print("Bad A:", bad_a.sum())
-print(df[bad_a][cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
+# bad_a = (df['response_a'].isin([False, '']) | df['response_a'].isna()) & ( df['winner_tie'] == 1)
+# print("Bad A:", bad_a.sum())
+# print(df[bad_a][cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
 
-bad_b = (df['response_b'].isin([False, '']) | df['response_b'].isna()) & ( df['winner_model_b'] == 1)
-print("Bad B:", bad_b.sum())
-print(df[bad_b][cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
+# bad_b = (df['response_b'].isin([False, '']) | df['response_b'].isna()) & ( df['winner_model_b'] == 1)
+# print("Bad B:", bad_b.sum())
+# print(df[bad_b][cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
 
 # empty = (df[cols].isin([False, '']) | df[cols].isna())
 # print(empty.sum())
@@ -206,9 +208,9 @@ print(df[bad_b][cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
 # bad_rows = df[mask]
 # print(bad_rows[cols + ['winner_model_a', 'winner_model_b', 'winner_tie']])
 
-mask = (df['response_a'].eq('') | df['response_b'].eq('')) & df['winner_tie'].eq(1)
-bad = df[mask]
-print(bad)
+# mask = (df['response_a'].eq('') | df['response_b'].eq('')) & df['winner_tie'].eq(1)
+# bad = df[mask]
+# print(bad)
 
 
 

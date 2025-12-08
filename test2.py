@@ -122,6 +122,8 @@ peft_config = LoraConfig(
 
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters() # 打印可训练参数量
+print(model)
+exit()
 
 optimizer = AdamW(
     model.parameters(),

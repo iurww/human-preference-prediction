@@ -85,8 +85,8 @@ class HumanPreferenceDataset(Dataset):
         
         # 截断
         prompt_tokens = self._keep_head(prompt_tokens, actual_prompt_len)
-        response_a_tokens = self._keep_tail(response_a_tokens, max_response_a_len)
-        response_b_tokens = self._keep_tail(response_b_tokens, max_response_b_len)
+        response_a_tokens = self._keep_head(response_a_tokens, max_response_a_len)
+        response_b_tokens = self._keep_head(response_b_tokens, max_response_b_len)
         
         # 构建最终序列: [CLS] prompt [SEP] response_a [SEP] response_b [SEP]
         # 根据swap参数决定是否交换ab位置
@@ -123,10 +123,7 @@ class HumanPreferenceDataset(Dataset):
     def _process_data(self):
         data_cols = ['prompt', 'response_a', 'response_b']
         label_cols = ['winner_model_a', 'winner_model_b', 'winner_tie']
-        special_ids = set([self.tokenizer.cls_token_id, 
-                        self.tokenizer.sep_token_id, 
-                        self.tokenizer.pad_token_id, 
-                        self.tokenizer.mask_token_id])
+        special_ids = set(self.tokenizer.all_special_ids)
         
         if not self.force_process and os.path.exists(self.cache_name):
             logging.info(f"加载缓存文件: {self.cache_name}")

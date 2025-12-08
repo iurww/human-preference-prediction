@@ -76,3 +76,5 @@ results/
 *.sh
 *.png
 *.jpg
+
+test*.py
