@@ -15,6 +15,8 @@ from pathlib import Path
 import logging
 from collections import Counter
 
+from configs import CONFIG
+
 
 class HumanPreferenceDataset(Dataset):
     def __init__(
@@ -137,40 +139,40 @@ class HumanPreferenceDataset(Dataset):
         
         logging.info("处理数据...")
         # 加载cols列中的json字符串
-        data_df = self.data[data_cols].map(lambda s: json.loads(s) if pd.notnull(s) else [])
+        self.data[data_cols] = self.data[data_cols].map(lambda s: json.loads(s) if pd.notnull(s) else [])
         
         # 确保cols列中每行json数组的长度一致()
-        assert data_df.apply(lambda row: len(set(map(len, row))) == 1, axis=1).isin([False]).sum() == 0
+        assert self.data[data_cols].apply(lambda row: len(set(map(len, row))) == 1, axis=1).isin([False]).sum() == 0
         
         # 合并多轮对话
-        data_df = data_df.map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 else '')
+        self.data[data_cols] = self.data[data_cols].map(lambda l: ' '.join([str(x) for x in l]) if len(l) > 0 else '')
         
         # 清洗数据
-        mask = data_df['response_a'].eq(data_df['response_b']) & data_df['winner_tie'].eq(0)
-        data_df.loc[mask, ['winner_tie', 'winner_model_a', 'winner_model_b']] = [1, 0, 0]
+        mask = self.data['response_a'].eq(self.data['response_b']) & self.data['winner_tie'].eq(0)
+        self.data.loc[mask, ['winner_tie', 'winner_model_a', 'winner_model_b']] = [1, 0, 0]
         
         mask_real_nan_a = (
-            data_df['response_a'].isna() |
-            data_df['response_a'].str.strip().str.lower().eq("none") |
-            data_df['response_a'].str.strip().eq("") |
-            data_df['response_a'].astype(str).str.fullmatch(r'\s*')
+            self.data['response_a'].isna() |
+            self.data['response_a'].str.strip().str.lower().eq("none") |
+            self.data['response_a'].str.strip().eq("") |
+            self.data['response_a'].astype(str).str.fullmatch(r'\s*')
         )
         mask_real_nan_b = (
-            data_df['response_b'].isna() |
-            data_df['response_b'].str.strip().str.lower().eq("none") |
-            data_df['response_b'].str.strip().eq("") | 
-            data_df['response_b'].astype(str).str.fullmatch(r'\s*')
+            self.data['response_b'].isna() |
+            self.data['response_b'].str.strip().str.lower().eq("none") |
+            self.data['response_b'].str.strip().eq("") | 
+            self.data['response_b'].astype(str).str.fullmatch(r'\s*')
         )
-        data_df[mask_real_nan_a & ~mask_real_nan_b & data_df['winner_tie'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 0, 1]
-        data_df[~mask_real_nan_a & mask_real_nan_b & data_df['winner_tie'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 1, 0]
-        data_df[mask_real_nan_a & ~mask_real_nan_b & data_df['winner_model_a'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 0, 1]
-        data_df[mask_real_nan_b & ~mask_real_nan_a & data_df['winner_model_b'] == 1][['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 1, 0]
+        self.data.loc[mask_real_nan_a & ~mask_real_nan_b & self.data['winner_tie'] == 1, ['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 0, 1]
+        self.data.loc[~mask_real_nan_a & mask_real_nan_b & self.data['winner_tie'] == 1, ['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 1, 0]
+        self.data.loc[mask_real_nan_a & ~mask_real_nan_b & self.data['winner_model_a'] == 1, ['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 0, 1]
+        self.data.loc[mask_real_nan_b & ~mask_real_nan_a & self.data['winner_model_b'] == 1, ['winner_tie', 'winner_model_a', 'winner_model_b']] = [0, 1, 0]
         
         # data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
 
         # tokenize
         logging.info("Tokenizing...")
-        data_df = data_df.map(lambda s: self.tokenizer.encode(s, add_special_tokens=False))
+        data_df = self.data[data_cols].map(lambda s: self.tokenizer.encode(s, add_special_tokens=False))
         
         # 去除special ids
         data_df = data_df.map(lambda x: [i for i in x if i not in special_ids])
@@ -205,6 +207,7 @@ class HumanPreferenceDataset(Dataset):
         
         # 合并两个数据集
         df = pd.concat([df_original, df_swapped], axis=0, ignore_index=True)
+        df = df.sample(frac=1, random_state=CONFIG['seed']).reset_index(drop=True)
         
         logging.info(f"数据扩充完成，原始行数: {len(df_original)}, 扩充后行数: {len(df)}")
         logging.info(f"保存缓存文件: {self.cache_name}")
