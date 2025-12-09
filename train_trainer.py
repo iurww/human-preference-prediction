@@ -1,5 +1,5 @@
 import os
-from time import time
+from anyio import sleep
 import pandas as pd
 import numpy as np
 import logging
@@ -19,7 +19,8 @@ import wandb
 
 from configs.logging_config import make_log_dir, init_logger
 from configs import CONFIG, print_config
-from dataset import HumanPreferenceDataset
+from dataset import HumanPreferenceDataset, get_data_collator
+from dataset.human_preference_test_dataset import HumanPreferenceTestDataset
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
@@ -203,12 +204,10 @@ def main():
     )
     
     # ============ 训练配置 ============
-    # 计算有效的batch size和steps
     effective_batch_size = CONFIG['batch_size']
     gradient_accumulation_steps = CONFIG.get('gradient_accumulation_steps', 1)
     
     if use_ddp:
-        # DDP下的实际batch size = per_device_batch_size * num_gpus * gradient_accumulation_steps
         total_batch_size = effective_batch_size * world_size * gradient_accumulation_steps
     else:
         total_batch_size = effective_batch_size * gradient_accumulation_steps
@@ -252,13 +251,13 @@ def main():
         
         # === Checkpoint保存策略 ===
         save_strategy="epoch",
-        save_total_limit=3,
+        save_total_limit=5,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         
         # === Logging配置 ===
-        logging_dir=f"{CONFIG['checkpoint_dir']}/logs",
+        logging_dir=f"{CONFIG['checkpoint_dir']}",
         logging_strategy="steps",
         logging_steps=20,
         logging_first_step=True,
@@ -287,14 +286,6 @@ def main():
         if training_args.report_to != "none":
             logging.info(f'✓ 启用实验追踪: {training_args.report_to}')
 
-    # ============ Data Collator ============
-    def custom_data_collator(features):
-        batch = {
-            'input_ids': torch.stack([f['input_ids'] for f in features]),
-            'attention_mask': torch.stack([f['attention_mask'] for f in features]),
-            'labels': torch.stack([f['labels'] for f in features])
-        }
-        return batch
     
     # ============ 创建Trainer ============
     callbacks = [DetailedLoggingCallback(log_every_n_steps=50)]
@@ -309,12 +300,11 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        data_collator=custom_data_collator,
+        data_collator=get_data_collator(tokenizer),
         compute_metrics=compute_metrics,
         callbacks=callbacks,
     )
     
-
     train_result = trainer.train()
     
     # ============ 保存最终模型 (只在主进程) ============

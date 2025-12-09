@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
     'warmup_ratio': 0.1,
     'weight_decay': 0.01,
     'seed': 42,
-    'val_rate': 0.05
+    'val_rate': 0.1
 }
 
 

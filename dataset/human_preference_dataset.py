@@ -85,10 +85,18 @@ class HumanPreferenceDataset(Dataset):
         max_response_a_len = remaining_length // 2
         max_response_b_len = remaining_length - max_response_a_len
         
+        if len(response_a_tokens) <= max_response_a_len and len(response_b_tokens) <= max_response_b_len:
+            max_response_a_len = len(response_a_tokens)
+            max_response_b_len = len(response_b_tokens)
+        elif len(response_a_tokens) > max_response_a_len and len(response_b_tokens) <= max_response_b_len:
+            max_response_a_len = remaining_length - len(response_b_tokens)
+        elif len(response_a_tokens) <= max_response_a_len and len(response_b_tokens) > max_response_b_len:
+            max_response_b_len = remaining_length - len(response_a_tokens)
+                    
         # 截断
-        prompt_tokens = self._keep_head(prompt_tokens, actual_prompt_len)
-        response_a_tokens = self._keep_head(response_a_tokens, max_response_a_len)
-        response_b_tokens = self._keep_head(response_b_tokens, max_response_b_len)
+        prompt_tokens = self._keep_tail(prompt_tokens, actual_prompt_len)
+        response_a_tokens = self._keep_tail(response_a_tokens, max_response_a_len)
+        response_b_tokens = self._keep_tail(response_b_tokens, max_response_b_len)
         
         # 构建最终序列: [CLS] prompt [SEP] response_a [SEP] response_b [SEP]
         # 根据swap参数决定是否交换ab位置
@@ -113,8 +121,8 @@ class HumanPreferenceDataset(Dataset):
         
         # Padding到max_length
         actual_len = len(input_ids)
-        padding_length = self.max_length - actual_len
-        input_ids += [self.tokenizer.pad_token_id] * padding_length
+        # padding_length = self.max_length - actual_len
+        # input_ids += [self.tokenizer.pad_token_id] * padding_length
         
         return pd.Series({
             'input_ids': input_ids,
@@ -221,20 +229,55 @@ class HumanPreferenceDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.samples.iloc[idx]
 
+        id_ = sample['id']
         input_ids = sample['input_ids']
         label = sample['label']
-        id_ = sample['id']
         seq_len = sample['seq_len']
 
-        attention_mask = [1] * seq_len + [0] * (self.max_length - seq_len)
+        # attention_mask = [1] * seq_len + [0] * (self.max_length - seq_len)
         
         return {
             'id': torch.tensor(id_, dtype=torch.long),
             'input_ids': torch.tensor(input_ids, dtype=torch.long),
-            'attention_mask': torch.tensor(attention_mask, dtype=torch.long),
+            # 'attention_mask': torch.tensor(attention_mask, dtype=torch.long),
             'labels': torch.tensor(label, dtype=torch.long),
         }
-
+        
+# ============ Data Collator ============
+def get_data_collator(tokenizer: AutoTokenizer):
+    def custom_data_collator(features):
+        max_len = max(f['input_ids'].size(0) for f in features)
+        
+        batch_input_ids = []
+        batch_attention_mask = []
+        batch_labels = []
+        
+        for f in features:
+            input_ids = f['input_ids']
+            seq_len = input_ids.size(0)
+            
+            padding_len = max_len - seq_len
+            
+            padded_input_ids = torch.cat([
+                input_ids,
+                torch.full((padding_len,), tokenizer.pad_token_id, dtype=torch.long)
+            ])
+            
+            attention_mask = torch.cat([
+                torch.ones(seq_len, dtype=torch.long),
+                torch.zeros(padding_len, dtype=torch.long)
+            ])
+            
+            batch_input_ids.append(padded_input_ids)
+            batch_attention_mask.append(attention_mask)
+            batch_labels.append(f['labels'])
+        
+        return {
+            'input_ids': torch.stack(batch_input_ids),
+            'attention_mask': torch.stack(batch_attention_mask),
+            'labels': torch.stack(batch_labels)
+        }
+    return custom_data_collator
 
 if __name__ == "__main__":
     

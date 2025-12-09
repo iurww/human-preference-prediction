@@ -125,7 +125,7 @@ def main():
     if torch.cuda.is_available():
         logging.info(f'GPU: {torch.cuda.get_device_name(0)}')
     
-    model_path = CONFIG.get('inference_model_path', f"{CONFIG['checkpoint_dir']}/checkpoint-40880")
+    model_path = CONFIG.get('inference_model_path', f"{CONFIG['checkpoint_dir']}/checkpoint-51100")
     logging.info(f'Loading model from: {model_path}')
     
     tokenizer = AutoTokenizer.from_pretrained("./models/deberta")

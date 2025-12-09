@@ -83,10 +83,18 @@ class HumanPreferenceTestDataset(Dataset):
         max_response_a_len = remaining_length // 2
         max_response_b_len = remaining_length - max_response_a_len
         
+        if len(response_a_tokens) <= max_response_a_len and len(response_b_tokens) <= max_response_b_len:
+            max_response_a_len = len(response_a_tokens)
+            max_response_b_len = len(response_b_tokens)
+        elif len(response_a_tokens) > max_response_a_len and len(response_b_tokens) <= max_response_b_len:
+            max_response_a_len = remaining_length - len(response_b_tokens)
+        elif len(response_a_tokens) <= max_response_a_len and len(response_b_tokens) > max_response_b_len:
+            max_response_b_len = remaining_length - len(response_a_tokens)
+        
         # 截断
-        prompt_tokens = self._keep_head(prompt_tokens, actual_prompt_len)
-        response_a_tokens = self._keep_head(response_a_tokens, max_response_a_len)
-        response_b_tokens = self._keep_head(response_b_tokens, max_response_b_len)
+        prompt_tokens = self._keep_tail(prompt_tokens, actual_prompt_len)
+        response_a_tokens = self._keep_tail(response_a_tokens, max_response_a_len)
+        response_b_tokens = self._keep_tail(response_b_tokens, max_response_b_len)
         
         # 构建最终序列: [CLS] prompt [SEP] response_a [SEP] response_b [SEP]
         # 根据swap参数决定是否交换ab位置
