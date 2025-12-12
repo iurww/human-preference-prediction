@@ -15,6 +15,8 @@ from transformers import (
     EarlyStoppingCallback,
     TrainerCallback
 )
+from peft import LoraConfig, get_peft_model, TaskType
+
 import wandb
 
 from configs.logging_config import make_log_dir, init_logger
@@ -149,23 +151,23 @@ def main():
    
     model = AutoModelForSequenceClassification.from_pretrained(
         CONFIG['model_name'],
-        num_labels=3,
-        hidden_dropout_prob=0.1,
-        attention_probs_dropout_prob=0.1,
-    )   
-    
-    for param in model.deberta.embeddings.parameters():
-        param.requires_grad = False
-    num_layers_to_freeze = 10  
-    for i, layer in enumerate(model.deberta.encoder.layer):
-        if i < num_layers_to_freeze:
-            for param in layer.parameters():
-                param.requires_grad = False
-    for param in model.classifier.parameters():
-        param.requires_grad = True
-    
-    if is_main:
-        print_model_info(model)
+        num_labels=3, 
+        # dtype=torch.float16,
+    )
+
+
+    peft_config = LoraConfig(
+        task_type=TaskType.SEQ_CLS,
+        inference_mode=False,
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.05,
+        # 针对 Qwen2.5 的全模块微调效果最好
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    )
+
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters() 
     
     # ============ 数据加载 ============
     if is_main:

@@ -35,7 +35,9 @@ data/
 *.zip
 
 # Models
-models/
+models/deberta
+models/qwen2.5-1.5b/
+
 weights/
 *.pth
 *.pt

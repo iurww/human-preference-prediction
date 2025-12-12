@@ -2,7 +2,7 @@ import argparse
 from typing import Any, Dict
 
 DEFAULT_CONFIG = {
-    'model_name': './models/deberta',
+    'model_name': './models/qwen2.5-1.5b',
     'train_dataset_path': './data/train.csv',
     'test_dataset_path': './data/test.csv',
     'log_dir': './logs',
@@ -14,7 +14,7 @@ DEFAULT_CONFIG = {
     'use_amp': False,
     'use_lora': False,
     'use_ddp': False,
-    'batch_size': 4,
+    'batch_size': 1,
     'learning_rate': 4e-5,
     'num_epochs': 25,
     'warmup_ratio': 0.1,

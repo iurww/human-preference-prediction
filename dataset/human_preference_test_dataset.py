@@ -72,7 +72,7 @@ class HumanPreferenceTestDataset(Dataset):
         
         # special tokens占用空间 ([CLS], [SEP], [SEP], [SEP])
         special_tokens_count = 4
-        available_length = self.max_length - special_tokens_count
+        available_length = self.max_length
         
         # 计算各部分长度限制
         max_prompt_len = int(available_length * self.prompt_ratio)
@@ -92,9 +92,9 @@ class HumanPreferenceTestDataset(Dataset):
             max_response_b_len = remaining_length - len(response_a_tokens)
         
         # 截断
-        prompt_tokens = self._keep_tail(prompt_tokens, actual_prompt_len)
-        response_a_tokens = self._keep_tail(response_a_tokens, max_response_a_len)
-        response_b_tokens = self._keep_tail(response_b_tokens, max_response_b_len)
+        prompt_tokens = self._keep_head(prompt_tokens, actual_prompt_len)
+        response_a_tokens = self._keep_head(response_a_tokens, max_response_a_len)
+        response_b_tokens = self._keep_head(response_b_tokens, max_response_b_len)
         
         # 构建最终序列: [CLS] prompt [SEP] response_a [SEP] response_b [SEP]
         # 根据swap参数决定是否交换ab位置
@@ -104,13 +104,9 @@ class HumanPreferenceTestDataset(Dataset):
             pos_1_tokens, pos_2_tokens = response_a_tokens, response_b_tokens
             
         input_ids = (
-            [self.tokenizer.cls_token_id] +
             prompt_tokens +
-            [self.tokenizer.sep_token_id] +
             pos_1_tokens +
-            [self.tokenizer.sep_token_id] +
-            pos_2_tokens +
-            [self.tokenizer.sep_token_id]
+            pos_2_tokens
         )
         
         if len(input_ids) > self.max_length:
@@ -154,7 +150,7 @@ class HumanPreferenceTestDataset(Dataset):
         # bad_b = (df['response_b'].isin([False, '']) | df['response_b'].isna()) & ( df['winner_tie'] == 1)
         # data_df.drop(index=df[bad_a | bad_b].index, inplace=True)
         
-        # data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
+        data_df = data_df.apply(lambda col: col.apply(lambda s: f"[{col.name.capitalize()}]:\n{s}") )
 
         # tokenize
         logging.info("Tokenizing...")
